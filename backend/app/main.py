@@ -39,9 +39,20 @@ from app.core.database import get_db
 from app.core.celery_app import celery_app
 import sentry_sdk
 import logging
-from pythonjsonlogger import jsonlogger
+try:
+    from importlib import import_module
+
+    jsonlogger = import_module("pythonjsonlogger.json")
+except ImportError:
+    jsonlogger = None
+
 handler = logging.StreamHandler()
-handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s"))
+formatter = (
+    jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s")
+    if jsonlogger
+    else logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+)
+handler.setFormatter(formatter)
 logger = logging.getLogger("recon")
 logger.handlers = [handler]
 logger.setLevel(settings.LOG_LEVEL)
