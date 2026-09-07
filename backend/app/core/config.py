@@ -2,6 +2,7 @@ import os
 
 from dotenv import load_dotenv
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pathlib import Path
@@ -46,6 +47,18 @@ class Settings(BaseSettings):
     PAYSTACK_WEBHOOK_SECRET: str | None = None
     SUBSCRIPTION_GRACE_DAYS: int = 3
 
+    DB_POOL_SIZE: int = Field(default=5, ge=1, le=50)
+    DB_MAX_OVERFLOW: int = Field(default=2, ge=0, le=50)
+    DB_POOL_TIMEOUT: int = Field(default=10, ge=1, le=60)
+    MAX_FILE_BYTES: int = Field(default=100 * 1024 * 1024, ge=1024)
+    MAX_SPREADSHEET_ROWS: int = Field(default=200_000, ge=1, le=1_000_000)
+    MAX_SPREADSHEET_COLUMNS: int = Field(default=200, ge=1, le=1000)
+    MAX_XLSX_EXPANDED_BYTES: int = Field(default=256 * 1024 * 1024, ge=1024)
+    EXPORT_MAX_ROWS: int = Field(default=200_000, ge=1, le=1_000_000)
+    EXPORT_MAX_BYTES: int = Field(default=100 * 1024 * 1024, ge=1024)
+    EXPORT_TTL_HOURS: int = Field(default=24, ge=1, le=168)
+    AUTH_RATE_LIMIT: int = Field(default=30, ge=1)
+    LOGIN_ACCOUNT_LIMIT: int = Field(default=10, ge=1)
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: str | None = None
     ENABLE_METRICS: bool = True
@@ -56,6 +69,8 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"
     S3_BUCKET: str | None = None
     S3_REGION: str | None = None
+    S3_PREFIX: str = "recon"
+    S3_KMS_KEY_ID: str | None = None
     S3_ENDPOINT_URL: str | None = None
     AWS_ACCESS_KEY_ID: str | None = None
     AWS_SECRET_ACCESS_KEY: str | None = None
@@ -78,6 +93,17 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        for name in ("S3_BUCKET", "S3_REGION", "S3_ENDPOINT_URL", "S3_KMS_KEY_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "PAYSTACK_SECRET_KEY", "PAYSTACK_PRO_PLAN_CODE", "PAYSTACK_PRO_ANNUAL_PLAN_CODE", "SENTRY_DSN"):
+            if getattr(self, name) == "":
+                setattr(self, name, None)
+        if self.STORAGE_BACKEND not in {"local", "s3"}:
+            raise RuntimeError("STORAGE_BACKEND must be local or s3.")
+        if self.STORAGE_BACKEND == "s3" and not self.S3_BUCKET:
+            raise RuntimeError("S3_BUCKET is required for shared storage.")
+        if self.is_production and (len(self.SECRET_KEY) < 32 or "replace-with" in self.SECRET_KEY):
+            raise RuntimeError("Production requires a random SECRET_KEY of at least 32 characters.")
+        if self.is_production and (not self.FRONTEND_URL.startswith("https://") or not self.REDIS_URL):
+            raise RuntimeError("Production requires HTTPS FRONTEND_URL and REDIS_URL.")
         if self.is_production and not self.SECRET_KEY:
             raise RuntimeError("SECRET_KEY must be set in production.")
         if self.is_production and self.SECRET_KEY == "dev-secret-key":

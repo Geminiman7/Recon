@@ -11,7 +11,7 @@ class ProcessorService:
         ).first()
 
         if existing:
-            raise Exception("Processor name already exists.")
+            raise ValueError("Processor name already exists.")
 
         processor = Processor(
             name=request.name,

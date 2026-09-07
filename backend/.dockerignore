@@ -47,3 +47,6 @@ docs/
 *.log
 tmp/
 temp/
+
+.env.*
+app/storage/

@@ -25,7 +25,7 @@ def get_dashboard_summary(
             db,
             current_user.company_id
         )
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(
             status_code=400,
             detail=str(e)

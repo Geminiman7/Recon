@@ -10,13 +10,11 @@ async function loadUsers(){
 
         users.forEach(u => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${u.full_name}</td>
-                <td>${u.email}</td>
-                <td>${u.role}</td>
-                <td>${u.is_active ? 'Yes' : 'No'}</td>
-                <td></td>
-            `;
+            [u.full_name, u.email, u.role, u.is_active ? "Yes" : "No", ""].forEach(value => {
+                const cell = document.createElement("td");
+                cell.textContent = value;
+                tr.appendChild(cell);
+            });
 
             // actions
             const actionsTd = tr.querySelector('td:last-child');
@@ -58,8 +56,8 @@ async function createUser(){
             return;
         }
 
-        if(payload.password.length < 8){
-            alert('Password must be at least 8 characters.');
+        if(payload.password.length < 12){
+            alert('Password must be at least 12 characters.');
             return;
         }
 

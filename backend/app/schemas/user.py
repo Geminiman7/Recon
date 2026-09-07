@@ -1,3 +1,5 @@
+from app.core.passwords import Password
+from uuid import UUID
 from pydantic import BaseModel
 from pydantic import EmailStr
 
@@ -10,14 +12,14 @@ class RegisterUser(BaseModel):
 
     email: EmailStr
 
-    password: str
+    password: Password
 
 
 class LoginUser(BaseModel):
 
     email: EmailStr
 
-    password: str
+    password: Password
 
 
 class CreateUserRequest(BaseModel):
@@ -26,14 +28,14 @@ class CreateUserRequest(BaseModel):
 
     email: EmailStr
 
-    password: str
+    password: Password
 
     role: str
 
 
 class UserResponse(BaseModel):
 
-    id: str
+    id: UUID
 
     full_name: str
 

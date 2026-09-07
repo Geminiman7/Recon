@@ -24,7 +24,7 @@ router = APIRouter(
 )
 
 
-@router.post("/company")
+@router.post("/company", response_model=UploadResponse)
 async def upload_company_file(
 
     job_id: UUID = Form(...),
@@ -33,7 +33,7 @@ async def upload_company_file(
 
     db: Session = Depends(get_db),
 
-    current_user=Depends(get_current_user)
+    current_user=Depends(require_permission("uploads:create"))
 
 ):
 
@@ -44,7 +44,7 @@ async def upload_company_file(
         file
     )
 
-@router.post("/processor")
+@router.post("/processor", response_model=UploadResponse)
 async def upload_processor_file(
 
     job_id: UUID = Form(...),
@@ -55,7 +55,7 @@ async def upload_processor_file(
 
     db: Session = Depends(get_db),
 
-    current_user=Depends(get_current_user)
+    current_user=Depends(require_permission("uploads:create"))
 
 ):
 
@@ -99,10 +99,10 @@ def get_upload_columns(
 
     try:
         return {"columns": HeaderService.read_headers(upload.storage_path)}
-    except Exception as error:
+    except ValueError as error:
         raise HTTPException(
             status_code=400,
-            detail=f"Unable to read file headers: {error}"
+            detail="Unable to read file headers. Check the file format and limits."
         )
 
 

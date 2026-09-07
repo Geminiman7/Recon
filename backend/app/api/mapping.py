@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_permission
 from app.models.column_mapping import ColumnMapping
 from app.models.job import JobStatus, ReconciliationJob
 from app.models.upload import Upload, UploadType
@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.post("/mapping")
-def save_mapping(payload: dict, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def save_mapping(payload: dict, db: Session = Depends(get_db), current_user=Depends(require_permission("reconciliation:run"))):
     try:
         if not payload or "job_id" not in payload:
             raise HTTPException(status_code=400, detail="Missing job_id in mapping payload.")
@@ -43,9 +43,12 @@ def save_mapping(payload: dict, db: Session = Depends(get_db), current_user=Depe
         job = db.query(ReconciliationJob).filter(
             ReconciliationJob.id == job_id,
             ReconciliationJob.company_id == current_user.company_id
-        ).first()
+        ).with_for_update().first()
         if not job:
             raise HTTPException(status_code=404, detail="Reconciliation job not found.")
+
+        if job.status in {JobStatus.QUEUED, JobStatus.PROCESSING}:
+            raise HTTPException(409, "Wait for reconciliation to finish before changing mappings.")
 
         company_upload = db.query(Upload).filter(
             Upload.id == company_file_id,
@@ -97,4 +100,4 @@ def save_mapping(payload: dict, db: Session = Depends(get_db), current_user=Depe
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise

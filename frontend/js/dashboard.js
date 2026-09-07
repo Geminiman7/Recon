@@ -37,21 +37,11 @@ async function loadDashboard() {
 
             const row = document.createElement("tr");
 
-            row.innerHTML = `
-                <td>
-                    ${job.job_name}
-                </td>
-
-                <td>
-                    <span class="status ${getStatusClass(job.status)}">
-                        ${job.status}
-                    </span>
-                </td>
-
-                <td>
-                    ${formatDate(job.created_at)}
-                </td>
-            `;
+            [job.job_name, job.status, formatDate(job.created_at)].forEach(value => {
+                const cell = document.createElement("td");
+                cell.textContent = value;
+                row.appendChild(cell);
+            });
 
             tbody.appendChild(row);
 

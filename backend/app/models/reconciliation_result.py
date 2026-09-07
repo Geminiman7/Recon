@@ -1,7 +1,7 @@
 import uuid
 import enum
 
-from sqlalchemy import Column, String, Float, Enum, ForeignKey
+from sqlalchemy import Column, String, Float, Enum, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
@@ -30,3 +30,6 @@ class ReconciliationResult(Base):
     processor_status = Column(String)
 
     status = Column(Enum(ReconciliationStatus), nullable=False)
+
+Index("ix_results_tenant_job_order", ReconciliationResult.company_id, ReconciliationResult.job_id, ReconciliationResult.transaction_id, ReconciliationResult.id)
+Index("ix_results_tenant_job_status", ReconciliationResult.company_id, ReconciliationResult.job_id, ReconciliationResult.status)

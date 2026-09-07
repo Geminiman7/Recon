@@ -1,3 +1,4 @@
+from app.core.passwords import Password
 from pydantic import BaseModel, EmailStr
 
 
@@ -14,4 +15,4 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirm(BaseModel):
     token: str
-    password: str
+    password: Password

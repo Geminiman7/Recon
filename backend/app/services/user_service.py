@@ -14,7 +14,7 @@ class UserService:
         ).first()
 
         if existing:
-            raise Exception("Email already exists.")
+            raise ValueError("Email already exists.")
 
         user = User(
             company_id=current_user.company_id,
@@ -41,7 +41,7 @@ class UserService:
         ).first()
 
         if not user:
-            raise Exception("User not found.")
+            raise ValueError("User not found.")
 
         db.delete(user)
         db.commit()
@@ -57,8 +57,10 @@ class UserService:
         ).first()
 
         if not user:
-            raise Exception("User not found.")
+            raise ValueError("User not found.")
 
+        if user.is_active != is_active:
+            user.session_version = User.session_version + 1
         user.is_active = is_active
         db.commit()
         db.refresh(user)

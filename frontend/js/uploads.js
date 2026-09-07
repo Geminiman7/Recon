@@ -492,11 +492,7 @@ async function uploadFile(event) {
 
     try {
 
-        const token =
-            localStorage.getItem(
-                "token"
-            );
-
+        const token = await ensureCsrf();
 
         /*
          * Use XMLHttpRequest so that we
@@ -606,12 +602,16 @@ function uploadWithProgress(
             if (token) {
 
                 xhr.setRequestHeader(
-                    "Authorization",
-                    `Bearer ${token}`
+                    "X-CSRF-Token",
+                    token
                 );
 
             }
 
+
+            xhr.withCredentials = true;
+            xhr.timeout = 120000;
+            xhr.ontimeout = () => reject(new Error("Upload timed out. Check the upload list before retrying."));
 
             xhr.upload.addEventListener(
                 "progress",
@@ -676,6 +676,7 @@ function uploadWithProgress(
 
                     else {
 
+                        if (xhr.status === 401) handleExpiredSession();
                         reject(
                             new Error(
                                 data?.detail ||

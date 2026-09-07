@@ -14,9 +14,9 @@ def _engine_kwargs():
     else:
         kwargs["pool_pre_ping"] = True
         kwargs["pool_recycle"] = 1800
-        kwargs["pool_size"] = 10
-        kwargs["max_overflow"] = 20
-        kwargs["pool_timeout"] = 30
+        kwargs["pool_size"] = settings.DB_POOL_SIZE
+        kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
+        kwargs["pool_timeout"] = settings.DB_POOL_TIMEOUT
     return kwargs
 
 

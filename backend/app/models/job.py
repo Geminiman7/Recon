@@ -74,5 +74,7 @@ class ReconciliationJob(Base):
         nullable=True
     )
 
+    run_token = Column(String(36), nullable=True)
+
     company = relationship("Company")
     creator = relationship("User")

@@ -30,4 +30,13 @@ celery_app.conf.update(
     worker_cancel_long_running_tasks_on_connection_loss=True,
 )
 
-celery_app.autodiscover_tasks(["app.workers"])
+celery_app.conf.imports = ("app.workers.reconciliation_worker", "app.workers.export_worker")
+celery_app.conf.beat_schedule = {"expire-exports": {"task": "app.workers.export_worker.cleanup_exports", "schedule": 3600.0}}
+
+from celery.signals import worker_process_init
+
+@worker_process_init.connect
+def reset_worker_pool(**kwargs):
+    from app.core.database import engine
+    engine.dispose(close=False)
+

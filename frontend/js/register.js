@@ -18,7 +18,7 @@ async function registerCompany() {
 
         alert(response.message);
 
-        window.location.href = "index.html";
+        window.location.href = "login.html";
 
     } catch (error) {
 

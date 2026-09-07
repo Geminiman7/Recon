@@ -32,7 +32,7 @@ document.getElementById("resetPasswordForm")?.addEventListener("submit", async e
     try {
         const response = await api("/auth/reset-password", "POST", { token, password });
         message.textContent = response.message;
-        setTimeout(() => { window.location.href = "index.html"; }, 1200);
+        setTimeout(() => { window.location.href = "login.html"; }, 1200);
     } catch (error) {
         message.textContent = error.message;
     }

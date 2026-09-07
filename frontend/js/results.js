@@ -9,6 +9,8 @@ let currentPage = 1;
 let pageSize = 50;
 
 let allResults = [];
+let resultTotalPages = 1;
+let resultRequest = 0;
 
 
 document.addEventListener(
@@ -201,7 +203,9 @@ async function loadJobs() {
    LOAD RESULTS
 ========================================== */
 
-async function loadResults() {
+async function loadResults(resetPage = true) {
+    if (resetPage !== false) currentPage = 1;
+    const requestNumber = ++resultRequest;
 
     selectedJobId =
         document.getElementById(
@@ -240,11 +244,14 @@ async function loadResults() {
          * GET /reconciliation/{job_id}/results
          */
 
-        const response =
-            await api(
-                `/reconciliation/${selectedJobId}/results`
-            );
-
+        pageSize = Number(document.getElementById("pageSize").value);
+        const params = resultParameters();
+        params.set("page", currentPage);
+        params.set("page_size", pageSize);
+        const response = await api(`/reconciliation/${selectedJobId}/results?${params}`);
+        if (requestNumber !== resultRequest) return;
+        resultTotalPages = Math.max(1, response.total_pages);
+        currentPage = response.page;
 
         allResults =
             response.results ||
@@ -260,8 +267,6 @@ async function loadResults() {
             response
         );
 
-
-        currentPage = 1;
 
         renderResults();
 
@@ -385,75 +390,18 @@ function updateSummary(response) {
 ========================================== */
 
 function applyFilters() {
-
     currentPage = 1;
-
-    renderResults();
-
+    loadResults(false);
 }
 
-
-/* ==========================================
-   GET FILTERED DATA
-========================================== */
-
-function getFilteredResults() {
-
-    const search =
-        document
-            .getElementById("searchInput")
-            .value
-            .trim()
-            .toLowerCase();
-
-
-    const status =
-        document
-            .getElementById("statusFilter")
-            .value;
-
-
-    return allResults.filter(result => {
-
-        const transactionId =
-            String(
-                result.transaction_id ??
-                result.txn_id ??
-                result.reference ??
-                ""
-            ).toLowerCase();
-
-
-        const resultStatus =
-            normalizeStatus(
-                result.status
-            );
-
-
-        const searchMatch =
-            !search ||
-            transactionId.includes(search);
-
-
-        const statusMatch =
-            !status ||
-            resultStatus === status ||
-            (
-                status === "MISSING" &&
-                ["MISSING_IN_COMPANY", "MISSING_IN_PROCESSOR"]
-                    .includes(resultStatus)
-            );
-
-
-        return (
-            searchMatch &&
-            statusMatch
-        );
-
-    });
-
+function resultParameters() {
+    const params = new URLSearchParams();
+    const search = document.getElementById("searchInput").value.trim();
+    const status = document.getElementById("statusFilter").value;
+    if (search) params.set("search", search);
+    if (status) params.set("status", status);
+    return params;
 }
-
 
 /* ==========================================
    RENDER
@@ -461,48 +409,8 @@ function getFilteredResults() {
 
 function renderResults() {
 
-    const filtered =
-        getFilteredResults();
-
-
-    pageSize =
-        Number(
-            document
-                .getElementById("pageSize")
-                .value
-        );
-
-
-    const totalPages =
-        Math.max(
-            1,
-            Math.ceil(
-                filtered.length /
-                pageSize
-            )
-        );
-
-
-    if (currentPage > totalPages) {
-        currentPage = totalPages;
-    }
-
-
-    const start =
-        (currentPage - 1) *
-        pageSize;
-
-
-    const end =
-        start + pageSize;
-
-
-    const pageResults =
-        filtered.slice(
-            start,
-            end
-        );
-
+    const totalPages = resultTotalPages;
+    const pageResults = allResults;
 
     const tbody =
         document.querySelector(
@@ -765,41 +673,18 @@ function statusBadge(status) {
 ========================================== */
 
 function previousPage() {
-
     if (currentPage > 1) {
-
         currentPage--;
-
-        renderResults();
-
+        loadResults(false);
     }
-
 }
-
 
 function nextPage() {
-
-    const filtered =
-        getFilteredResults();
-
-
-    const pages =
-        Math.ceil(
-            filtered.length /
-            pageSize
-        );
-
-
-    if (currentPage < pages) {
-
+    if (currentPage < resultTotalPages) {
         currentPage++;
-
-        renderResults();
-
+        loadResults(false);
     }
-
 }
-
 
 /* ==========================================
    DETAILS
@@ -920,109 +805,70 @@ function closeModal() {
    EXPORT
 ========================================== */
 
-async function exportExcel() {
+async function exportExcel() { await requestExport("excel"); }
+async function exportPdf() { await requestExport("pdf"); }
 
-    if (!selectedJobId) {
-        return;
+function exportMessage(message) {
+    let element = document.getElementById("exportMessage");
+    if (!element) {
+        element = document.createElement("p");
+        element.id = "exportMessage";
+        element.setAttribute("role", "status");
+        document.getElementById("exportPdfBtn").parentElement.appendChild(element);
     }
-
-
-    try {
-
-        const response =
-            await fetch(
-                exportUrl("excel"),
-                {
-                    headers: {
-                        Authorization:
-                            `Bearer ${localStorage.getItem("token")}`
-                    }
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "Excel export failed."
-            );
-
-        }
-
-
-        const blob =
-            await response.blob();
-
-
-        downloadBlob(
-            blob,
-            `reconciliation-${selectedJobId}.xlsx`
-        );
-
-
-    }
-    catch (error) {
-
-        alert(
-            error.message
-        );
-
-    }
-
+    element.textContent = message;
 }
 
-
-async function exportPdf() {
-
-    if (!selectedJobId) {
-        return;
-    }
-
-
+async function requestExport(format) {
+    if (!selectedJobId) return;
+    const buttons = ["exportExcelBtn", "exportPdfBtn"].map(id => document.getElementById(id));
+    buttons.forEach(button => { button.disabled = true; });
     try {
-
-        const response =
-            await fetch(
-                exportUrl("pdf"),
-                {
-                    headers: {
-                        Authorization:
-                            `Bearer ${localStorage.getItem("token")}`
-                    }
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "PDF export failed."
-            );
-
-        }
-
-
-        const blob =
-            await response.blob();
-
-
-        downloadBlob(
-            blob,
-            `reconciliation-${selectedJobId}.pdf`
-        );
-
-
+        const record = await api(`/reconciliation/${selectedJobId}/export/${format}?${resultParameters()}`, "POST");
+        sessionStorage.setItem("recon_pending_export", JSON.stringify({id: record.id, format}));
+        await waitForExport(record.id, format);
+    } catch (error) {
+        exportMessage(error.message);
+    } finally {
+        buttons.forEach(button => { button.disabled = false; });
     }
-    catch (error) {
-
-        alert(
-            error.message
-        );
-
-    }
-
 }
 
+async function waitForExport(id, format) {
+    exportMessage("Preparing your export. You can continue reviewing results.");
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+        const status = await api(`/reconciliation/exports/${id}`);
+        if (status.state === "FAILED") {
+            sessionStorage.removeItem("recon_pending_export");
+            throw new Error(status.error || "Export failed. Please try again.");
+        }
+        if (status.state === "READY") {
+            const link = document.createElement("a");
+            link.href = `${API_URL}/reconciliation/exports/${id}/download`;
+            link.textContent = "Download prepared export";
+            exportMessage("Your export is ready. ");
+            document.getElementById("exportMessage").appendChild(link);
+            sessionStorage.removeItem("recon_pending_export");
+            link.click();
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    exportMessage("Your export is still queued. Reload this page later to check its status.");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    const saved = sessionStorage.getItem("recon_pending_export");
+    if (!saved) return;
+    try {
+        const record = JSON.parse(saved);
+        waitForExport(record.id, record.format).catch(error => {
+            if ([401, 403, 404, 410].includes(error.status)) sessionStorage.removeItem("recon_pending_export");
+            exportMessage(error.message);
+        });
+    } catch { sessionStorage.removeItem("recon_pending_export"); }
+});
 
 function downloadBlob(
     blob,
@@ -1078,16 +924,3 @@ function isNumber(value) {
 
 }
 
-function exportUrl(format) {
-
-    const parameters = new URLSearchParams();
-    const status = document.getElementById("statusFilter").value;
-    const search = document.getElementById("searchInput").value.trim();
-
-    if (status) parameters.set("status", status);
-    if (search) parameters.set("search", search);
-
-    const query = parameters.toString();
-    return `${API_URL}/reconciliation/${selectedJobId}/export/${format}${query ? `?${query}` : ""}`;
-
-}

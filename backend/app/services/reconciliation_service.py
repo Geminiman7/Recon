@@ -16,27 +16,6 @@ from app.core.config import settings
 class ReconciliationService:
 
     @staticmethod
-    def enqueue(db: Session, company_id, job_id, user_id=None):
-        job = db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id).first()
-        if not job:
-            raise Exception("Job not found.")
-        if job.status == JobStatus.PROCESSING:
-            raise Exception("Job is already processing.")
-        job.status = JobStatus.QUEUED
-        ActivityService.audit(db, company_id, user_id, "reconciliation.queued", "reconciliation_job", job_id, {"mode": settings.RECONCILIATION_MODE})
-        db.commit()
-        if settings.RECONCILIATION_MODE == "async":
-            from app.workers.reconciliation_worker import run_reconciliation_task
-            run_reconciliation_task.delay(company_id, job_id, user_id)
-            return {
-                "message": "Reconciliation queued for background processing.",
-                "result_state": "QUEUED",
-                "mapping_state": "COMPLETE",
-                "job_id": str(job_id),
-            }
-        return ReconciliationService.run(db, company_id, job_id, user_id)
-
-    @staticmethod
     def apply_mapping(df, mappings, source):
         rename_map = {
             getattr(mapping, f"{source}_column").strip().lower().replace(" ", "_"): mapping.canonical_column
@@ -49,8 +28,19 @@ class ReconciliationService:
         return df.rename(columns=normalized_columns).rename(columns=rename_map)
 
     @staticmethod
-    def run(db: Session, company_id, job_id, user_id=None):
+    def run(db: Session, company_id, job_id, user_id=None, run_token=None):
 
+        from fastapi import HTTPException
+        job = db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id,
+            ReconciliationJob.company_id == company_id).with_for_update().first()
+        if not job:
+            raise HTTPException(404, "Job not found.")
+        if not run_token or job.run_token != run_token:
+            raise HTTPException(409, "Reconciliation attempt is no longer current.")
+        if job.status == JobStatus.COMPLETED:
+            return {"result_state": "COMPLETED"}
+        job.status = JobStatus.PROCESSING
+        db.flush()
         company_upload = (
             db.query(Upload)
             .filter(
@@ -80,11 +70,8 @@ class ReconciliationService:
         )
 
         if not company_upload or not processor_uploads:
-            raise Exception("Both company and processor files are required.")
+            raise ValueError("Both company and processor files are required.")
 
-        job = db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id).first()
-        job.status = JobStatus.PROCESSING
-        db.commit()
 
         company_source_df = DataFrameService.load_file(company_upload.storage_path)
         company_df = None
@@ -96,7 +83,7 @@ class ReconciliationService:
                 ColumnMapping.processor_upload_id == processor_upload.id
             ).all()
             if not mappings:
-                raise Exception(f"No column mapping has been saved for processor file '{processor_upload.original_filename}'.")
+                raise ValueError(f"No column mapping has been saved for processor file '{processor_upload.original_filename}'.")
 
             mapped_company_df = ReconciliationService.apply_mapping(
                 company_source_df.copy(), mappings, "company")
@@ -108,7 +95,7 @@ class ReconciliationService:
             if company_df is None:
                 company_df = mapped_company_df
             elif not company_df.equals(mapped_company_df):
-                raise Exception(
+                raise ValueError(
                     "Company column mappings differ between selected processor files. "
                     "Use the same company mappings for every processor file."
                 )
@@ -131,6 +118,8 @@ class ReconciliationService:
             objects.append(ReconciliationResult( company_id=company_id, job_id=job_id, transaction_id=row["transaction_id"], company_amount=row["company_amount"], processor_amount=row["processor_amount"], company_status=row["company_status"], processor_status=row["processor_status"], status=row["status"] ))
 
         db.bulk_save_objects(objects)
+        from datetime import datetime
+        job.completed_at = datetime.utcnow()
         job.status = JobStatus.COMPLETED
         ActivityService.audit(db, company_id, user_id, "reconciliation.completed", "reconciliation_job", job_id, {"results": len(results)})
         ActivityService.notify(db, company_id, "Reconciliation ready for review", f"{job.job_name} has refreshed results to validate.", "success", user_id)
@@ -165,22 +154,30 @@ class ReconciliationService:
 
     @staticmethod
     def enqueue(db: Session, company_id, job_id, user_id=None):
-        if settings.RECONCILIATION_MODE.lower() != "async":
-            return ReconciliationService.run(db, company_id, job_id, user_id)
-
-        from app.workers.reconciliation_worker import run_reconciliation_task
-        job = db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id).first()
-        job.status = JobStatus.PENDING
+        from uuid import uuid4
+        from fastapi import HTTPException
+        job = db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id,
+            ReconciliationJob.company_id == company_id).with_for_update().first()
+        if not job:
+            raise HTTPException(404, "Job not found.")
+        if job.status in {JobStatus.QUEUED, JobStatus.PROCESSING}:
+            raise HTTPException(409, "Job is already queued or processing.")
+        run_token = str(uuid4())
+        job.run_token = run_token
+        job.status = JobStatus.QUEUED
+        job.completed_at = None
         db.commit()
-
-        run_reconciliation_task.delay(str(company_id), str(job_id), str(user_id) if user_id else None)
-
-        return {
-            "message": "Reconciliation queued for background processing.",
-            "result_state": "PENDING",
-            "mapping_state": "COMPLETE",
-            "total": 0,
-            "matched": 0,
-            "mismatched": 0,
-            "missing": 0,
-        }
+        try:
+            if settings.RECONCILIATION_MODE.lower() == "async":
+                from app.workers.reconciliation_worker import run_reconciliation_task
+                run_reconciliation_task.delay(str(company_id), str(job_id), str(user_id) if user_id else None, run_token)
+            else:
+                return ReconciliationService.run(db, company_id, job_id, user_id, run_token)
+        except Exception:
+            db.rollback()
+            db.query(ReconciliationJob).filter(ReconciliationJob.id == job_id,
+                ReconciliationJob.company_id == company_id, ReconciliationJob.run_token == run_token,
+                ReconciliationJob.status == JobStatus.QUEUED).update({"status": JobStatus.FAILED})
+            db.commit()
+            raise
+        return {"message": "Reconciliation queued.", "result_state": "QUEUED", "job_id": str(job_id)}

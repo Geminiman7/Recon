@@ -1,3 +1,9 @@
+import logging
+from fastapi import Request, Response
+from app.core.sessions import SESSION_COOKIE, issue_csrf, set_session, clear_session
+from app.core.throttling import throttle
+from app.core.config import settings
+from app.models.user import User
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -30,7 +36,7 @@ def register_company(
             request
         )
 
-    except Exception as e:
+    except ValueError as e:
 
         raise HTTPException(
             status_code=400,
@@ -40,17 +46,18 @@ def register_company(
 @router.post("/login")
 def login(
     request: LoginRequest,
+    response: Response,
     db: Session = Depends(get_db)
 ):
 
+    throttle("account", request.email.lower(), settings.LOGIN_ACCOUNT_LIMIT, 900)
     try:
 
-        return AuthService.login(
-            db,
-            request
-        )
+        result = AuthService.login(db, request)
+        set_session(response, result["access_token"])
+        return {"message": "Signed in successfully."}
 
-    except Exception as e:
+    except ValueError as e:
 
         raise HTTPException(
             status_code=401,
@@ -63,6 +70,7 @@ def forgot_password(request: PasswordResetRequest, db: Session = Depends(get_db)
     try:
         return AuthService.request_password_reset(db, request.email)
     except Exception:
+        logging.getLogger("recon").exception("Password reset delivery failed")
         # Do not disclose whether the address exists or expose mail-provider errors.
         return {"message": "If that email is registered, a password reset link has been sent."}
 
@@ -89,3 +97,16 @@ def me(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     }
     response["subscription"] = BillingService.serialize_entitlement(db, current_user.company_id)
     return response
+
+
+@router.get("/csrf")
+def csrf(request: Request, response: Response):
+    return {"csrf_token": issue_csrf(response, request.cookies.get(SESSION_COOKIE, ""))}
+
+
+@router.post("/logout")
+def logout(response: Response, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    current_user.session_version = User.session_version + 1
+    db.commit()
+    clear_session(response)
+    return {"message": "Signed out."}

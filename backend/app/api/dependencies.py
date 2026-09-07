@@ -1,3 +1,5 @@
+from fastapi import Request
+from app.core.sessions import SESSION_COOKIE
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -15,10 +17,13 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
     db: Session = Depends(get_db)
 ):
 
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Sign in is required.")
     try:
 
         payload = jwt.decode(
@@ -55,6 +60,8 @@ def get_current_user(
                 detail="User not found."
             )
 
+        if not user.is_active or payload.get("ver") != user.session_version:
+            raise HTTPException(401, "Your session has expired. Sign in again.")
         return user
 
     except JWTError:

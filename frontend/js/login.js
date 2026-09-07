@@ -11,11 +11,6 @@ async function login() {
             }
         );
 
-        localStorage.setItem(
-            "token",
-            response.access_token
-        );
-
         window.location.href = "dashboard.html";
 
     } catch (error) {

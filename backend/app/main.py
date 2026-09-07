@@ -39,7 +39,13 @@ from app.core.database import get_db
 from app.core.celery_app import celery_app
 import sentry_sdk
 import logging
+from pythonjsonlogger import jsonlogger
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s"))
 logger = logging.getLogger("recon")
+logger.handlers = [handler]
+logger.setLevel(settings.LOG_LEVEL)
+logger.propagate = False
 
 
 
@@ -66,48 +72,23 @@ async def startup_event():
             logger.warning("Failed to initialize Sentry: %s", exc)
 
 
+from app.core.sessions import validate_csrf
+from app.core.throttling import throttle
+from fastapi import HTTPException
+
 @app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    request.state.request_id = request.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex}"
+async def request_security(request: Request, call_next):
+    try:
+        if request.url.path.startswith("/auth") and request.url.path != "/auth/csrf":
+            throttle("ip", request.client.host if request.client else "unknown", settings.AUTH_RATE_LIMIT)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path != "/billing/webhooks/paystack":
+            validate_csrf(request)
+    except HTTPException as exc:
+        return await http_exception_handler(request, exc)
     response = await call_next(request)
-    response.headers["X-Request-Id"] = request.state.request_id
+    if request.url.path not in {"/health/live", "/health/ready"}:
+        response.headers["Cache-Control"] = "no-store"
     return response
-
-
-from time import time
-from collections import defaultdict
-
-
-class RateLimiter:
-    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
-        self._requests: dict[str, list[float]] = defaultdict(list)
-
-    def is_allowed(self, client_ip: str) -> bool:
-        now = time()
-        window_start = now - self.window_seconds
-        self._requests[client_ip] = [t for t in self._requests[client_ip] if t > window_start]
-        if len(self._requests[client_ip]) >= self.max_requests:
-            return False
-        self._requests[client_ip].append(now)
-        return True
-
-
-rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path.startswith("/auth"):
-        client_ip = request.client.host if request.client else "unknown"
-        if not rate_limiter.is_allowed(client_ip):
-            return JSONResponse(
-                status_code=429,
-                content={"title": "Too many requests", "detail": "Rate limit exceeded. Try again later."},
-                headers={"Retry-After": "60"},
-            )
-    return await call_next(request)
 
 
 @app.middleware("http")
@@ -126,6 +107,14 @@ async def log_requests(request: Request, call_next):
         response.status_code,
         extra={"request_id": getattr(request.state, "request_id", None)},
     )
+    return response
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request.state.request_id = f"req_{uuid.uuid4().hex}"
+    response = await call_next(request)
+    response.headers["X-Request-Id"] = request.state.request_id
     return response
 
 
@@ -195,184 +184,9 @@ def health_ready(db=Depends(get_db)):
     return JSONResponse(content=payload, status_code=200 if ready else 503)
 
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
-from sqlalchemy.orm import Session
-from uuid import UUID
-from io import BytesIO
-import pandas as pd
+from app.api.reconciliation import router as reconciliation_router
+app.include_router(reconciliation_router)
 
-from app.core.database import get_db
-from app.api.dependencies import get_current_user, require_permission
-from app.services.reconciliation_service import ReconciliationService
-from app.models.reconciliation_result import ReconciliationResult, ReconciliationStatus
-
-router = APIRouter(prefix="/reconciliation", tags=["Reconciliation"])
-
-
-def serialize_result(result):
-    """Keep the results board and exported files based on the same fields."""
-    company_amount = result.company_amount
-    processor_amount = result.processor_amount
-    difference = (
-        processor_amount - company_amount
-        if company_amount is not None and processor_amount is not None
-        else None
-    )
-    return {
-        "id": str(result.id),
-        "transaction_id": result.transaction_id,
-        "company_amount": company_amount,
-        "processor_amount": processor_amount,
-        "difference": difference,
-        "company_status": result.company_status,
-        "processor_status": result.processor_status,
-        "status": result.status.value,
-    }
-
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "service": "Recon API"}
-
-
-def filtered_results(job_id, current_user, db, status=None, search=None):
-    query = db.query(ReconciliationResult).filter(
-        ReconciliationResult.job_id == job_id,
-        ReconciliationResult.company_id == current_user.company_id,
-    )
-    if status:
-        normalized_status = status.upper()
-        if normalized_status == "MISSING":
-            query = query.filter(ReconciliationResult.status.in_([
-                ReconciliationStatus.MISSING_IN_COMPANY,
-                ReconciliationStatus.MISSING_IN_PROCESSOR,
-            ]))
-        else:
-            try:
-                query = query.filter(ReconciliationResult.status == ReconciliationStatus(normalized_status))
-            except ValueError:
-                raise HTTPException(status_code=422, detail="Invalid result status.")
-    if search:
-        query = query.filter(ReconciliationResult.transaction_id.ilike(f"%{search.strip()}%"))
-    return query.order_by(ReconciliationResult.transaction_id).all()
-
-
-def create_simple_pdf(rows):
-    """Create a dependency-free, printable PDF for reconciliation exports."""
-    lines = ["Recon Reconciliation Results", ""]
-    for row in rows:
-        line = " | ".join([
-            str(row["transaction_id"]),
-            str(row["company_amount"] if row["company_amount"] is not None else "-"),
-            str(row["processor_amount"] if row["processor_amount"] is not None else "-"),
-            str(row["difference"] if row["difference"] is not None else "-"),
-            row["status"],
-        ])
-        lines.append(line[:120])
-    if len(rows) == 0:
-        lines.append("No results match the selected filters.")
-
-    page_lines = [lines[index:index + 44] for index in range(0, len(lines), 44)] or [[]]
-    objects = ["<< /Type /Catalog /Pages 2 0 R >>", ""]
-    page_ids = []
-    content_ids = []
-    next_id = 3
-    for _ in page_lines:
-        page_ids.append(next_id)
-        content_ids.append(next_id + 1)
-        next_id += 2
-    objects[1] = "<< /Type /Pages /Kids [" + " ".join(f"{page_id} 0 R" for page_id in page_ids) + f"] /Count {len(page_ids)} >>"
-    for page_id, content_id, page in zip(page_ids, content_ids, page_lines):
-        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 {next_id} 0 R >> >> /Contents {content_id} 0 R >>")
-        commands = ["BT /F1 9 Tf 36 756 Td 12 TL"]
-        for line in page:
-            safe_line = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-            commands.append(f"({safe_line}) Tj T*")
-        commands.append("ET")
-        content = "\n".join(commands)
-        objects.append(f"<< /Length {len(content.encode('latin-1', 'replace'))} >>\nstream\n{content}\nendstream")
-    objects.append("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    pdf = "%PDF-1.4\n"
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(len(pdf.encode("latin-1", "replace")))
-        pdf += f"{index} 0 obj\n{obj}\nendobj\n"
-    xref = len(pdf.encode("latin-1", "replace"))
-    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
-    pdf += "".join(f"{offset:010d} 00000 n \n" for offset in offsets[1:])
-    pdf += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"
-    return pdf.encode("latin-1", "replace")
-
-@router.post("/{job_id}/run")
-def run_reconciliation(job_id: UUID, db: Session = Depends(get_db), current_user=Depends(require_permission("reconciliation:run"))):
-    try:
-        return ReconciliationService.enqueue(db, current_user.company_id, job_id, current_user.id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/{job_id}/results")
-def get_reconciliation_results(job_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    try:
-        results = db.query(ReconciliationResult).filter(
-            ReconciliationResult.job_id == job_id,
-            ReconciliationResult.company_id == current_user.company_id
-        ).all()
-
-        total = len(results)
-        matched = sum(1 for r in results if r.status == ReconciliationStatus.MATCHED)
-        mismatched = sum(1 for r in results if r.status in [
-            ReconciliationStatus.AMOUNT_MISMATCH,
-            ReconciliationStatus.STATUS_MISMATCH,
-            ReconciliationStatus.DUPLICATE,
-        ])
-        duplicates = sum(1 for r in results if r.status == ReconciliationStatus.DUPLICATE)
-        missing = sum(1 for r in results if r.status in [
-            ReconciliationStatus.MISSING_IN_COMPANY,
-            ReconciliationStatus.MISSING_IN_PROCESSOR
-        ])
-
-        return {
-            "total": total,
-            "matched": matched,
-            "mismatched": mismatched,
-            "duplicates": duplicates,
-            "missing": missing,
-            "results": [
-                serialize_result(result)
-                for result in results
-            ]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/{job_id}/export/excel")
-def export_excel(job_id: UUID, status: str | None = Query(None), search: str | None = Query(None), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    rows = [serialize_result(result) for result in filtered_results(job_id, current_user, db, status, search)]
-    columns = ["transaction_id", "company_amount", "processor_amount", "difference", "company_status", "processor_status", "status"]
-    dataframe = pd.DataFrame(rows, columns=columns).rename(columns={
-        "transaction_id": "Transaction ID", "company_amount": "Company Amount",
-        "processor_amount": "Processor Amount", "difference": "Difference",
-        "company_status": "Company Status", "processor_status": "Processor Status", "status": "Result Status",
-    })
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        dataframe.to_excel(writer, index=False, sheet_name="Results")
-        worksheet = writer.sheets["Results"]
-        worksheet.freeze_panes = "A2"
-        for column_cells in worksheet.columns:
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max(len(str(cell.value or "")) for cell in column_cells) + 2, 28)
-    return StreamingResponse(BytesIO(output.getvalue()), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="reconciliation-{job_id}.xlsx"'})
-
-
-@router.get("/{job_id}/export/pdf")
-def export_pdf(job_id: UUID, status: str | None = Query(None), search: str | None = Query(None), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    rows = [serialize_result(result) for result in filtered_results(job_id, current_user, db, status, search)]
-    return Response(content=create_simple_pdf(rows), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="reconciliation-{job_id}.pdf"'})
-
-app.include_router(router)
 from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(

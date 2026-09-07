@@ -9,6 +9,7 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.production.example
 .eggs/
 *.egg-info/
 dist/
@@ -44,3 +45,6 @@ temp/
 
 # Docker
 docker-compose.override.yml
+
+.audit-tools/
+artifacts/

@@ -17,3 +17,7 @@ celery==5.4.0
 redis==5.0.8
 sentry-sdk==2.13.0
 python-json-logger==2.0.7
+
+boto3>=1.35,<2
+xlrd==2.0.2
+defusedxml==0.7.1

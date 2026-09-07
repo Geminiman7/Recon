@@ -29,7 +29,7 @@ def problem(status: int, detail=None, request_id: str | None = None):
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(problem(exc.status_code, exc.detail, getattr(request.state, "request_id", None)), status_code=exc.status_code, media_type="application/problem+json")
+    return JSONResponse(problem(exc.status_code, exc.detail, getattr(request.state, "request_id", None)), status_code=exc.status_code, media_type="application/problem+json", headers=exc.headers)
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -47,4 +47,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             sentry_sdk.capture_exception(exc)
         except Exception:
             pass
-    return JSONResponse(problem(500, request_id=request_id), status_code=500, media_type="application/problem+json")
+    return JSONResponse(problem(500, request_id=request_id), status_code=500, media_type="application/problem+json", headers={"X-Request-Id": request_id or "unknown", "Cache-Control": "no-store"})

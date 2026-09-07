@@ -1,0 +1,26 @@
+# Host Nginx: replace recon.example.com and provision certificates first.
+# The origin Compose port is bound only to host loopback (127.0.0.1:8080).
+server {
+    listen 80;
+    server_name recon.example.com;
+    location /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { return 301 https://recon.example.com$request_uri; }
+}
+server {
+    listen 443 ssl;
+    server_name recon.example.com;
+    ssl_certificate /etc/letsencrypt/live/recon.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/recon.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 101M;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        # Overwrite untrusted headers rather than append them.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 120s;
+        proxy_hide_header Strict-Transport-Security;
+    }
+}

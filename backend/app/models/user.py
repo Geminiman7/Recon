@@ -3,7 +3,7 @@ import enum
 
 from sqlalchemy import Column
 from sqlalchemy import String
-from sqlalchemy import Boolean
+from sqlalchemy import Boolean, Integer
 from sqlalchemy import ForeignKey
 from sqlalchemy import Enum
 
@@ -64,6 +64,8 @@ class User(Base):
         default=True,
         nullable=False
     )
+
+    session_version = Column(Integer, nullable=False, default=0, server_default="0")
 
     company = relationship(
         "Company",

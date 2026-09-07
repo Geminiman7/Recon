@@ -1,3 +1,4 @@
+from app.core.passwords import Password
 from pydantic import BaseModel, EmailStr
 
 
@@ -9,4 +10,4 @@ class CompanyRegistration(BaseModel):
 
     admin_name: str
     admin_email: EmailStr
-    password: str
+    password: Password

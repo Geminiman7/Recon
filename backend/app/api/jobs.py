@@ -41,7 +41,7 @@ def create_job(
             request
         )
 
-    except Exception as e:
+    except ValueError as e:
 
         raise HTTPException(
             status_code=400,
@@ -55,7 +55,7 @@ def create_job(
 )
 def get_jobs(
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission("jobs:delete"))
+    current_user=Depends(get_current_user)
 ):
 
     return JobService.get_company_jobs(
@@ -94,7 +94,7 @@ def get_job(
 def delete_job(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(require_permission("jobs:delete"))
 ):
 
     try:
@@ -105,5 +105,5 @@ def delete_job(
         )
     except JobNotFoundException as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

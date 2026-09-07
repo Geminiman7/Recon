@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from app.schemas.user import CreateUserRequest
+from app.schemas.user import CreateUserRequest, UserResponse
 from app.models.user import User, UserRole
 
 from app.services.user_service import UserService
@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 
-@router.post("/")
+@router.post("/", response_model=UserResponse)
 def create_user(
     request: CreateUserRequest,
     db: Session = Depends(get_db),
@@ -41,7 +41,7 @@ def create_user(
     )
 
 
-@router.get("/")
+@router.get("/", response_model=list[UserResponse])
 def list_users(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
@@ -66,11 +66,11 @@ def delete_user(
 
     try:
         return UserService.delete_user(db, current_user, user_id)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.patch("/{user_id}/active")
+@router.patch("/{user_id}/active", response_model=UserResponse)
 def set_user_active(
     user_id: UUID,
     active: bool,
@@ -83,5 +83,5 @@ def set_user_active(
 
     try:
         return UserService.set_active(db, current_user, user_id, active)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

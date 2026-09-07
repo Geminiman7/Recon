@@ -28,7 +28,7 @@ def create_processor(
 
     try:
         return ProcessorService.create_processor(db, request)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
