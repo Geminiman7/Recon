@@ -1,5 +1,8 @@
 # Production deployment guide
 
+For Railway, follow [RAILWAY.md](RAILWAY.md). The Compose instructions below
+apply to a single Docker host.
+
 The root `docker-compose.yml` is the canonical deployment definition. Do not
 combine it with `backend/docker-compose.yml` or
 `backend/docker-compose.override.yml`; those files are retained only as legacy

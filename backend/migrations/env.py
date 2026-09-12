@@ -9,7 +9,8 @@ from app.models import audit_log, column_mapping, company, job, notification
 from app.models import password_reset_token, processor, reconciliation_result, subscription, upload, user, export_request
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# ConfigParser treats percent-encoded credentials as interpolation syntax.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

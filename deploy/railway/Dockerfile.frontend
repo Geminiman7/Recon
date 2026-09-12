@@ -1,0 +1,6 @@
+FROM nginx:1.28-alpine
+COPY frontend/ /usr/share/nginx/html/
+COPY deploy/railway/default.conf.template /etc/nginx/templates/default.conf.template
+ENV PORT=8080 API_PORT=8000 NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+ENV NGINX_ENVSUBST_FILTER="^(PORT|API_HOST|API_PORT|NGINX_LOCAL_RESOLVERS)$"
+EXPOSE 8080

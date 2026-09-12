@@ -93,6 +93,10 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        if self.DATABASE_URL.startswith("postgres://"):
+            self.DATABASE_URL = "postgresql+psycopg2://" + self.DATABASE_URL[len("postgres://"):]
+        if os.getenv("RAILWAY_ENVIRONMENT_ID") and self.is_production and self.STORAGE_BACKEND != "s3":
+            raise RuntimeError("Railway API and workers require shared S3 storage; set STORAGE_BACKEND=s3.")
         for name in ("S3_BUCKET", "S3_REGION", "S3_ENDPOINT_URL", "S3_KMS_KEY_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "PAYSTACK_SECRET_KEY", "PAYSTACK_PRO_PLAN_CODE", "PAYSTACK_PRO_ANNUAL_PLAN_CODE", "SENTRY_DSN"):
             if getattr(self, name) == "":
                 setattr(self, name, None)

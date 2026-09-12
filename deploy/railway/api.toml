@@ -1,0 +1,12 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+preDeployCommand = "python -m alembic upgrade head"
+startCommand = "/app/scripts/start-api.sh"
+# Readiness needs a worker; liveness avoids deployment ordering deadlocks.
+healthcheckPath = "/health/live"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
