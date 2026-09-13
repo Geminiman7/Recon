@@ -30,6 +30,8 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+RUN python /app/scripts/check-password-backend.py
+
 # Create directories for uploads and runtime files
 RUN mkdir -p storage/uploads /tmp/celery \
     && chown -R appuser:appuser storage /tmp/celery

@@ -18,6 +18,8 @@ COPY --from=base /usr/local/bin /usr/local/bin
 
 COPY backend/ /app/
 
+RUN python /app/scripts/check-password-backend.py
+
 RUN mkdir -p /app/app/storage/uploads /app/app/storage/exports
 
 RUN sed -i 's/\r$//' /app/scripts/*.sh && chmod +x /app/scripts/*.sh
