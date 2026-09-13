@@ -1,3 +1,5 @@
+# LEGACY ONLY: New Railway services cannot use Config as Code.
+# Existing support ends 2026-12-01. Use dashboard settings in RAILWAY.md.
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"

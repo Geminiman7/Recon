@@ -7,20 +7,56 @@ Keep the same-origin API URL: login and CSRF cookies depend on it.
 
 ## Services
 
-Create PostgreSQL and Redis in the same Railway project/environment. Connect
-four repository services, each with Root Directory / and these Config File paths:
+Config as Code is deprecated: new services cannot opt in, and existing files
+stop being read on 2026-12-01. Configure this deployment directly in the Railway
+dashboard using the settings below. Do not select the TOML files in Railway
+Config File. They are retained only as legacy references.
 
-| Service | Config File | Public domain |
-| --- | --- | --- |
-| frontend (existing) | /deploy/railway/frontend.toml | Keep existing domain; target port 8080 |
-| api | /deploy/railway/api.toml | None |
-| worker | /deploy/railway/worker.toml | None |
-| beat | /deploy/railway/beat.toml | None |
+Create PostgreSQL and Redis in the same project/environment. Connect frontend,
+api, worker and beat to this repository, with Root Directory / for all four.
+Keep the existing frontend domain (target port 8080); keep the other services private.
 
-Clear conflicting dashboard build/start commands and Dockerfile overrides.
-Remove worker/beat HTTP healthchecks. Keep one beat replica. Disable serverless
-sleeping on API, worker and beat. These files do not provision services or variables.
-Use the root Dockerfile for Python services, not the legacy backend Dockerfiles.
+### Build settings
+
+In each service's Variables tab, set RAILWAY_DOCKERFILE_PATH:
+
+| Service | RAILWAY_DOCKERFILE_PATH |
+| --- | --- |
+| frontend | deploy/railway/Dockerfile.frontend |
+| api | Dockerfile |
+| worker | Dockerfile |
+| beat | Dockerfile |
+
+Leave custom Build Command empty; the Dockerfiles install dependencies.
+Remove any obsolete Railway Config File selection after copying its effective
+settings into the dashboard, since legacy files override dashboard settings.
+
+### Deploy settings
+
+Enter these in each service's Settings:
+
+| Service | Start Command | Pre-deploy Command | Healthcheck Path | Healthcheck Timeout |
+| --- | --- | --- | --- | --- |
+| frontend | Leave empty (use image default) | Empty | /nginx-health | 60 seconds |
+| api | /app/scripts/start-api.sh | python -m alembic upgrade head | /health/live | 120 seconds |
+| worker | celery -A app.core.celery_app worker --loglevel=INFO --concurrency=2 --max-tasks-per-child=100 | Empty | Empty | Not applicable |
+| beat | celery -A app.core.celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule | Empty | Empty | Not applicable |
+
+Set Restart Policy to On Failure with 10 retries on all four services.
+Keep exactly one beat replica. Disable serverless sleeping for API, worker and
+beat. Use the root Dockerfile for Python services, not the legacy backend Dockerfiles.
+
+### Optional Infrastructure as Code
+
+Railway's replacement is project-level .railway/railway.ts evaluated by its CLI.
+For this existing project, import actual services rather than recreating them:
+install/update the Railway CLI, then run railway login, railway link,
+railway config pull, and railway config plan. Confirm the correct project and
+environment when linking. Review the plan before railway config apply.
+Do not use --include-variables when pulling: the default preserves remote
+secrets instead of writing their values into source. Existing legacy config
+management must be migrated before IaC can manage those services.
+The dashboard setup above does not require IaC.
 
 ## Variables
 
@@ -75,6 +111,12 @@ API_HOST=${{api.RAILWAY_PRIVATE_DOMAIN}}
 API_PORT=8000
 ```
 
+Use Railway reference syntax exactly: `${{service.VARIABLE}}`, where `service`
+is the API service name as shown in Railway. `${api_host}` or
+`${{api_host}}` will be passed through as literal text and Nginx will try to
+resolve it as a hostname. `API_HOST` must evaluate to a hostname only, such as
+`api.railway.internal`; keep `http://` and `:8000` out of this variable.
+
 Never put database, storage or application secrets on the frontend service.
 Leave frontend RECON_API_URL unset; /api is the intended URL.
 
@@ -117,6 +159,7 @@ container environment. No Railway services or credentials were changed.
 
 ## References
 
-- https://docs.railway.com/config-as-code/reference
+- https://docs.railway.com/infrastructure-as-code
+- https://docs.railway.com/builds/dockerfiles
 - https://docs.railway.com/networking/private-networking
 - https://docs.railway.com/guides/fastapi
