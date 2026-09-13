@@ -108,7 +108,7 @@ Additional frontend variables (replace api if named differently):
 ```dotenv
 PORT=8080
 API_HOST=${{api.RAILWAY_PRIVATE_DOMAIN}}
-API_PORT=8000
+API_PORT=${{api.PORT}}
 ```
 
 Use Railway reference syntax exactly: `${{service.VARIABLE}}`, where `service`
@@ -119,6 +119,15 @@ resolve it as a hostname. `API_HOST` must evaluate to a hostname only, such as
 
 Never put database, storage or application secrets on the frontend service.
 Leave frontend RECON_API_URL unset; /api is the intended URL.
+
+If Nginx reports `connect() failed (111: Connection refused)` to an IPv6
+upstream, check that the API deployment is running and listening on `::` at
+the same port as frontend `API_PORT`. The startup script defaults to `::` on
+Railway; remove any API `API_HOST=0.0.0.0` override or change it to `::`.
+The frontend's own `PORT=8080` is independent of the API port. With the API
+`PORT=8000` above, the upstream must use port 8000. Redeploy the API and then
+the frontend after updating variables. If it still refuses connections,
+inspect API startup logs for crashes before testing CSRF again.
 
 Configure SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL
 and SMTP_USE_TLS on the API for password-reset email. Configure PAYSTACK_SECRET_KEY,
