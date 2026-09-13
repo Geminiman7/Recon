@@ -5,6 +5,8 @@ psycopg2-binary==2.9.9
 alembic==1.13.3
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# Passlib 1.7.4 backend checks are incompatible with bcrypt 5.
+bcrypt==4.0.1
 python-multipart==0.0.9
 python-dotenv==1.0.1
 pydantic==2.8.2
