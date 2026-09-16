@@ -1090,7 +1090,7 @@ function escapeHtml(value) {
 
 async function loadProcessors() {
     try {
-        const response = await api("/processors");
+        const response = await api("/processors/");
 
         const processors =
             Array.isArray(response)
@@ -1163,7 +1163,7 @@ async function createProcessor(event) {
 
     try {
         const processor = await api(
-            "/processors",
+            "/processors/",
             "POST",
             {
                 name,
