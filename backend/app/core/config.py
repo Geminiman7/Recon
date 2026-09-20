@@ -65,6 +65,10 @@ class Settings(BaseSettings):
 
     RECONCILIATION_MODE: str = "sync"
     REDIS_URL: str | None = None
+    REDIS_PROBE_INTERVAL: int = Field(default=5, ge=1, le=60)
+    REDIS_RECOVERY_PROBES: int = Field(default=2, ge=1, le=10)
+    FALLBACK_POLL_SECONDS: int = Field(default=2, ge=1, le=60)
+    FALLBACK_GRACE_SECONDS: int = Field(default=30, ge=0, le=300)
 
     STORAGE_BACKEND: str = "local"
     S3_BUCKET: str | None = None
@@ -93,6 +97,7 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.REDIS_URL = self.REDIS_URL.strip() or None if self.REDIS_URL else None
         if self.DATABASE_URL.startswith("postgres://"):
             self.DATABASE_URL = "postgresql+psycopg2://" + self.DATABASE_URL[len("postgres://"):]
         if os.getenv("RAILWAY_ENVIRONMENT_ID") and self.is_production and self.STORAGE_BACKEND != "s3":
@@ -106,8 +111,8 @@ class Settings(BaseSettings):
             raise RuntimeError("S3_BUCKET is required for shared storage.")
         if self.is_production and (len(self.SECRET_KEY) < 32 or "replace-with" in self.SECRET_KEY):
             raise RuntimeError("Production requires a random SECRET_KEY of at least 32 characters.")
-        if self.is_production and (not self.FRONTEND_URL.startswith("https://") or not self.REDIS_URL):
-            raise RuntimeError("Production requires HTTPS FRONTEND_URL and REDIS_URL.")
+        if self.is_production and not self.FRONTEND_URL.startswith("https://"):
+            raise RuntimeError("Production requires HTTPS FRONTEND_URL.")
         if self.is_production and not self.SECRET_KEY:
             raise RuntimeError("SECRET_KEY must be set in production.")
         if self.is_production and self.SECRET_KEY == "dev-secret-key":

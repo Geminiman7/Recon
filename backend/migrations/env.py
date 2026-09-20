@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
+from app.models import resilience
 from app.models import audit_log, column_mapping, company, job, notification
 from app.models import password_reset_token, processor, reconciliation_result, subscription, upload, user, export_request
 

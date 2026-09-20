@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import logging
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError, InterfaceError
 from app.core.config import settings
 from app.models.export_request import ExportRequest
 from app.models.job import ReconciliationJob, JobStatus
@@ -38,14 +39,8 @@ def create_export(db, current_user, job_id, format, status=None, search=None):
     db.add(record)
     db.commit()
     from app.workers.export_worker import build_export
-    try:
-        build_export.delay(str(record.id), str(current_user.company_id))
-    except Exception:
-        logging.getLogger("recon").exception("Export queue publish failed")
-        record.state = "FAILED"
-        record.error = "Export queue is unavailable. Please try again."
-        db.commit()
-        raise HTTPException(503, record.error)
+    from app.core.redis_health import publish
+    publish(build_export, str(record.id), str(current_user.company_id))
     return record
 
 
@@ -75,6 +70,10 @@ def generate_export(db, export_id, company_id):
         record.storage_path = reference
         record.state = "READY"
         db.commit()
+    except (OperationalError, InterfaceError):
+        # Rollback restores PENDING; the durable consumer retries after recovery.
+        db.rollback()
+        raise
     except Exception:
         logging.getLogger("recon").exception("Export generation failed", extra={"export_id": str(export_id)})
         db.rollback()

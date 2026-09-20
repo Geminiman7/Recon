@@ -1,7 +1,7 @@
 import uuid
 import enum
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index
 from sqlalchemy import String
 from sqlalchemy import Enum
 from sqlalchemy import DateTime
@@ -30,6 +30,7 @@ class JobStatus(str, enum.Enum):
 class ReconciliationJob(Base):
 
     __tablename__ = "reconciliation_jobs"
+    __table_args__ = (Index("ix_jobs_fallback", "status", "queued_at"),)
 
     id = Column(
         UUID(as_uuid=True),
@@ -75,6 +76,8 @@ class ReconciliationJob(Base):
     )
 
     run_token = Column(String(36), nullable=True)
+    queued_at = Column(DateTime, nullable=True)
+    queued_by = Column(UUID(as_uuid=True), nullable=True)
 
     company = relationship("Company")
     creator = relationship("User")

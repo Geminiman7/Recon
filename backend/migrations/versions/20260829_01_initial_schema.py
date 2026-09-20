@@ -14,9 +14,13 @@ from app.models import password_reset_token, processor, reconciliation_result, s
 def initial_metadata():
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
-        if table.name != "export_requests":
+        if table.name not in {"export_requests", "rate_buckets", "worker_heartbeats"}:
             table.to_metadata(metadata)
-    for table_name, column in [("users", "session_version"), ("reconciliation_jobs", "run_token")]:
+    jobs = metadata.tables["reconciliation_jobs"]
+    for index in list(jobs.indexes):
+        if index.name == "ix_jobs_fallback":
+            jobs.indexes.remove(index)
+    for table_name, column in [("users", "session_version"), ("reconciliation_jobs", "run_token"), ("reconciliation_jobs", "queued_at"), ("reconciliation_jobs", "queued_by")]:
         table = metadata.tables[table_name]
         if column in table.c:
             table._columns.remove(table.c[column])

@@ -1,5 +1,31 @@
 # Railway deployment
 
+## Running without Redis
+
+Redis is optional. Deploy the latest code to the API and a separate
+`fallback-worker` service in the same Railway environment. Both use Root
+Directory `/` and `RAILWAY_DOCKERFILE_PATH=Dockerfile`.
+
+- API pre-deploy command: `python -m alembic upgrade head`.
+- Keep the API start command `/app/scripts/start-api.sh`.
+- Worker start command: `python -m app.workers.fallback_worker`.
+- Leave `REDIS_URL` unset or empty on both services. Set
+  `RECONCILIATION_MODE=async` on both.
+- Share `DATABASE_URL`, `SECRET_KEY`, HTTPS `FRONTEND_URL`, and all S3/storage
+  variables with the worker. PostgreSQL and shared S3 storage remain required.
+- Start with one worker replica, `DB_POOL_SIZE=2`, `DB_MAX_OVERFLOW=0`,
+  sleeping disabled and restart-on-failure enabled. Leave its HTTP healthcheck
+  and public domain empty.
+- Deploy the API/migration before the worker. No Celery worker or beat service
+  is needed in this mode: the fallback also performs expiry cleanup.
+
+Check `/api/health/ready` through the frontend (or `/health/ready` on the API).
+Expect `status: ready`, `fallback_worker: ok`, and Redis/Celery `disabled`.
+Without a fresh worker heartbeat readiness returns 503. Submit a reconciliation
+and verify completion before considering the rollout complete.
+
+The Redis/Celery deployment described below is an optional alternative.
+
 The live frontend https://insightful-adventure-production-169c.up.railway.app/
 returned 200 during review, but /api/health/live and /api/health/ready returned
 404. Deploy the Nginx frontend below to route /api to the private backend.

@@ -2,6 +2,7 @@ protectPage();
 
 
 let uploads = [];
+let uploadsLoaded = false;
 let selectedFile = null;
 let selectedFileType = "company";
 
@@ -16,11 +17,7 @@ document.addEventListener(
 
         setupFilePicker();
 
-        await loadJobs();
-
-        await loadProcessors();
-
-        await loadUploads();
+        await Promise.allSettled([loadJobs(), loadProcessors(), loadUploads()]);
 
     }
 );
@@ -717,10 +714,13 @@ function uploadWithProgress(
 
 async function loadUploads() {
 
+    const message = document.getElementById("uploadsListMessage");
+    message.hidden = false;
+    message.textContent = "Loading uploaded files...";
     try {
 
         const response =
-            await api("/uploads");
+            await api("/uploads/");
 
 
         if (Array.isArray(response)) {
@@ -746,7 +746,7 @@ async function loadUploads() {
         }
         else {
 
-            uploads = [];
+            throw new Error("The server returned an unexpected file list. Please try Refresh.");
 
         }
 
@@ -754,6 +754,9 @@ async function loadUploads() {
         renderUploads();
 
         updateUploadStats();
+        uploadsLoaded = true;
+        message.hidden = true;
+        message.textContent = "";
 
     }
 
@@ -764,11 +767,17 @@ async function loadUploads() {
             error
         );
 
-        uploads = [];
-
-        renderUploads();
-
-        updateUploadStats();
+        message.hidden = false;
+        message.textContent = "Unable to load uploaded files. " +
+            (uploadsLoaded ? "Showing the last loaded list. " : "") +
+            "Select Refresh to retry. " + (error.message || "");
+        if (!uploadsLoaded) {
+            document.querySelector("#uploadsTable tbody").innerHTML =
+                '<tr><td colspan="6">File list unavailable. Please retry.</td></tr>';
+            for (const id of ["totalUploads", "companyUploads", "processorUploads", "processingUploads"]) {
+                document.getElementById(id).innerText = "—";
+            }
+        }
 
     }
 

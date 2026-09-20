@@ -48,3 +48,6 @@ docker-compose.override.yml
 
 .audit-tools/
 artifacts/
+
+# Workspace-local test dependencies
+.test-deps/

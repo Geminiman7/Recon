@@ -37,8 +37,8 @@ class ReconciliationService:
             raise HTTPException(404, "Job not found.")
         if not run_token or job.run_token != run_token:
             raise HTTPException(409, "Reconciliation attempt is no longer current.")
-        if job.status == JobStatus.COMPLETED:
-            return {"result_state": "COMPLETED"}
+        if job.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
+            return {"result_state": job.status.value}
         job.status = JobStatus.PROCESSING
         db.flush()
         company_upload = (
@@ -166,11 +166,15 @@ class ReconciliationService:
         job.run_token = run_token
         job.status = JobStatus.QUEUED
         job.completed_at = None
+        from datetime import datetime
+        job.queued_at = datetime.utcnow()
+        job.queued_by = user_id
         db.commit()
         try:
             if settings.RECONCILIATION_MODE.lower() == "async":
                 from app.workers.reconciliation_worker import run_reconciliation_task
-                run_reconciliation_task.delay(str(company_id), str(job_id), str(user_id) if user_id else None, run_token)
+                from app.core.redis_health import publish
+                publish(run_reconciliation_task, str(company_id), str(job_id), str(user_id) if user_id else None, run_token)
             else:
                 return ReconciliationService.run(db, company_id, job_id, user_id, run_token)
         except Exception:

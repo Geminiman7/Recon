@@ -164,32 +164,31 @@ def health_ready(db=Depends(get_db)):
     except Exception:
         db_ok = False
 
-    redis_ok = False
-    if settings.REDIS_URL:
+    from app.core.redis_health import circuit
+    from app.workers.fallback_worker import healthy
+    redis_ok = circuit.available()
+    fallback_ok = False
+    if db_ok:
         try:
-            import redis
-            r = redis.from_url(settings.REDIS_URL, socket_timeout=2, socket_connect_timeout=2)
-            r.ping()
-            redis_ok = True
+            fallback_ok = healthy(db)
         except Exception:
-            redis_ok = False
-
+            db_ok = False
     celery_ok = False
     if redis_ok:
         try:
-            insp = celery_app.control.inspect(timeout=2)
-            celery_ok = bool(insp.ping())
+            celery_ok = bool(celery_app.control.inspect(timeout=1).ping())
         except Exception:
-            celery_ok = False
-
-    ready = db_ok and redis_ok and celery_ok
+            pass
+    ready = db_ok and (fallback_ok or (redis_ok and celery_ok))
     payload = {
-        "status": "ready" if ready else "unavailable",
+        "status": ("ready" if not settings.REDIS_URL or (redis_ok and celery_ok) else "degraded") if ready else "unavailable",
         "service": "Recon API",
         "checks": {
             "database": "ok" if db_ok else "failed",
-            "redis": "ok" if redis_ok else "failed",
-            "celery": "ok" if celery_ok else "failed",
+            "redis": ("ok" if redis_ok else "failed") if settings.REDIS_URL else "disabled",
+            "celery": ("ok" if celery_ok else "failed") if settings.REDIS_URL else "disabled",
+            "fallback_worker": "ok" if fallback_ok else "failed",
+            "redis_circuit": circuit.state,
         },
     }
     return JSONResponse(content=payload, status_code=200 if ready else 503)

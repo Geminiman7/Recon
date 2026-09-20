@@ -4,6 +4,10 @@ x-backend-environment: &backend-environment
   DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-recon}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-recon}
   REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/0
   RECONCILIATION_MODE: async
+  REDIS_PROBE_INTERVAL: ${REDIS_PROBE_INTERVAL:-5}
+  REDIS_RECOVERY_PROBES: ${REDIS_RECOVERY_PROBES:-2}
+  FALLBACK_POLL_SECONDS: ${FALLBACK_POLL_SECONDS:-2}
+  FALLBACK_GRACE_SECONDS: ${FALLBACK_GRACE_SECONDS:-30}
   SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
   ENVIRONMENT: production
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -122,8 +126,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
       interval: 15s
@@ -152,6 +154,21 @@ services:
       timeout: 10s
       retries: 4
       start_period: 30s
+    stop_grace_period: 35m
+
+  fallback-worker:
+    <<: *backend-service
+    cpus: ${WORKER_CPUS:-2.0}
+    mem_limit: ${WORKER_MEMORY:-3g}
+    command: ["python", "-m", "app.workers.fallback_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.database import SessionLocal; from app.workers.fallback_worker import healthy; db = SessionLocal(); raise SystemExit(0 if healthy(db) else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     stop_grace_period: 35m
 
   scheduler:

@@ -69,7 +69,8 @@ async def upload_processor_file(
 
 
 
-@router.get('/', response_model=list[UploadResponse])
+@router.get('', response_model=list[UploadResponse])
+@router.get('/', response_model=list[UploadResponse], include_in_schema=False)
 def list_uploads(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
@@ -77,7 +78,7 @@ def list_uploads(
 
     uploads = db.query(Upload).filter(
         Upload.company_id == current_user.company_id
-    ).all()
+    ).order_by(Upload.uploaded_at.desc(), Upload.id.desc()).all()
 
     return uploads
 

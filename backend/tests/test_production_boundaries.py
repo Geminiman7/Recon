@@ -56,6 +56,9 @@ class BoundaryTests(unittest.TestCase):
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
         self.db = self.Session()
+        rate_db = patch("app.core.throttling.SessionLocal", self.Session)
+        rate_db.start()
+        self.addCleanup(rate_db.stop)
         self.company = Company(company_name="One", company_email="one@example.com")
         self.other = Company(company_name="Two", company_email="two@example.com")
         self.db.add_all([self.company, self.other])
@@ -99,8 +102,30 @@ class BoundaryTests(unittest.TestCase):
             transaction_id="secret", status=ReconciliationStatus.MATCHED))
         self.db.commit()
 
+    def test_upload_list_matches_mapping_without_redirect_and_is_tenant_scoped(self):
+        from app.models.upload import Upload, UploadType, UploadStatus
+        own = Upload(company_id=self.company.id, job_id=self.job.id, uploaded_by=self.user.id,
+            original_filename="company.csv", stored_filename="company.csv", storage_path="local://company.csv",
+            file_size=20, checksum="a" * 64, mime_type="text/csv",
+            upload_type=UploadType.COMPANY, status=UploadStatus.UPLOADED)
+        foreign = Upload(company_id=self.other.id, job_id=self.foreign.id, uploaded_by=self.user.id,
+            original_filename="private.csv", stored_filename="private.csv", storage_path="local://private.csv",
+            file_size=20, checksum="b" * 64, mime_type="text/csv",
+            upload_type=UploadType.COMPANY, status=UploadStatus.UPLOADED)
+        self.db.add_all([own, foreign])
+        self.db.commit()
+        mapped = self.client.get(f"/uploads/job/{self.job.id}")
+        self.assertEqual(mapped.status_code, 200)
+        for path in ("/uploads", "/uploads/"):
+            response = self.client.get(path, follow_redirects=False)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("location", response.headers)
+            self.assertEqual(response.json(), mapped.json())
+            self.assertEqual([row["id"] for row in response.json()], [str(own.id)])
+            self.assertNotIn("storage_path", response.json()[0])
+
     def test_cross_company_run_denied_without_mutation_or_publish(self):
-        with patch("app.workers.reconciliation_worker.run_reconciliation_task.delay") as publish:
+        with patch("app.workers.reconciliation_worker.run_reconciliation_task.apply_async") as publish:
             with self.assertRaises(HTTPException) as failure:
                 ReconciliationService.enqueue(self.db, self.company.id, self.foreign.id, self.user.id)
             self.assertEqual(failure.exception.status_code, 404)
@@ -116,18 +141,18 @@ class BoundaryTests(unittest.TestCase):
 
     def test_duplicate_enqueue_and_publish_failure(self):
         with patch.object(settings, "RECONCILIATION_MODE", "async"):
-            with patch("app.workers.reconciliation_worker.run_reconciliation_task.delay"):
+            with patch("app.workers.reconciliation_worker.run_reconciliation_task.apply_async"):
                 ReconciliationService.enqueue(self.db, self.company.id, self.job.id, self.user.id)
                 with self.assertRaises(HTTPException) as failure:
                     ReconciliationService.enqueue(self.db, self.company.id, self.job.id, self.user.id)
                 self.assertEqual(failure.exception.status_code, 409)
             self.job.status = JobStatus.FAILED
             self.db.commit()
-            with patch("app.workers.reconciliation_worker.run_reconciliation_task.delay", side_effect=RuntimeError("offline")):
-                with self.assertRaises(RuntimeError):
-                    ReconciliationService.enqueue(self.db, self.company.id, self.job.id, self.user.id)
+            with patch("app.core.redis_health.circuit.available", return_value=True), patch("app.workers.reconciliation_worker.run_reconciliation_task.apply_async", side_effect=RuntimeError("offline")):
+                result = ReconciliationService.enqueue(self.db, self.company.id, self.job.id, self.user.id)
             self.db.refresh(self.job)
-            self.assertEqual(self.job.status, JobStatus.FAILED)
+            self.assertEqual(result["result_state"], "QUEUED")
+            self.assertEqual(self.job.status, JobStatus.QUEUED)
 
     def test_pagination_filter_summary_and_tenant_isolation(self):
         self.add_results()
@@ -291,17 +316,19 @@ class FileBoundaryTests(unittest.TestCase):
             set_session(response, "session")
             self.assertIn("Secure", response.headers["set-cookie"])
 
-    def test_redis_fail_closed_and_atomic_expiry(self):
-        import redis
-        from app.core.throttling import throttle, SCRIPT
-        with patch.object(settings, "REDIS_URL", "redis://example"), patch("app.core.throttling.client") as client:
-            client.return_value.eval.side_effect = redis.ConnectionError("offline")
-            with self.assertRaises(HTTPException) as failure:
-                throttle("test", "one", 2)
-            self.assertEqual(failure.exception.status_code, 503)
-            client.return_value.eval.side_effect = None
-            client.return_value.eval.return_value = 3
+    def test_durable_rate_limit_survives_redis_outage(self):
+        from app.core.throttling import throttle
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        self.addCleanup(engine.dispose)
+        with patch("app.core.throttling.SessionLocal", sessionmaker(bind=engine)), patch.object(settings, "REDIS_URL", "redis://unavailable"):
+            throttle("test", "one", 2)
+            throttle("test", "one", 2)
             with self.assertRaises(HTTPException) as failure:
                 throttle("test", "one", 2)
             self.assertEqual(failure.exception.status_code, 429)
-            self.assertIn("EXPIRE", SCRIPT)
+        from sqlalchemy.exc import OperationalError
+        with patch("app.core.throttling.SessionLocal", side_effect=OperationalError("offline", {}, None)):
+            with self.assertRaises(HTTPException) as failure:
+                throttle("test", "two", 2)
+            self.assertEqual(failure.exception.status_code, 503)
