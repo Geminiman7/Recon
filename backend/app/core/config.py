@@ -23,13 +23,13 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    CORS_ORIGINS: str = "https://vigilant-mercy-production.up.railway.app/"
+    CORS_ORIGINS: str = "https://trustworthy-adventure-production-8c9f.up.railway.app/"
 
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
-    FRONTEND_URL: str = "https://vigilant-mercy-production.up.railway.app/"
+    FRONTEND_URL: str = "https://trustworthy-adventure-production-8c9f.up.railway.app/"
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
