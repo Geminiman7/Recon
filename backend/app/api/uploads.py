@@ -100,6 +100,10 @@ def get_upload_columns(
 
     try:
         return {"columns": HeaderService.read_headers(upload.storage_path)}
+    except FileNotFoundError as error:
+        raise HTTPException(410,
+            "The stored file is missing. Restore it from backup, or create a new job "
+            "and upload the original files again.") from error
     except ValueError as error:
         raise HTTPException(
             status_code=400,

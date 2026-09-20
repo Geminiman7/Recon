@@ -16,6 +16,17 @@ from app.core.config import settings
 class ReconciliationService:
 
     @staticmethod
+    def load_upload(upload):
+        from fastapi import HTTPException
+        try:
+            return DataFrameService.load_file(upload.storage_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(422,
+                f"The stored file '{upload.original_filename}' is missing. "
+                "Restore it from backup, or create a new job, upload the original files again, "
+                "and save the column mapping. Ask your administrator to check persistent storage.") from exc
+
+    @staticmethod
     def apply_mapping(df, mappings, source):
         rename_map = {
             getattr(mapping, f"{source}_column").strip().lower().replace(" ", "_"): mapping.canonical_column
@@ -73,7 +84,7 @@ class ReconciliationService:
             raise ValueError("Both company and processor files are required.")
 
 
-        company_source_df = DataFrameService.load_file(company_upload.storage_path)
+        company_source_df = ReconciliationService.load_upload(company_upload)
         company_df = None
         processor_frames = []
         for processor_upload in processor_uploads:
@@ -88,7 +99,7 @@ class ReconciliationService:
             mapped_company_df = ReconciliationService.apply_mapping(
                 company_source_df.copy(), mappings, "company")
             processor_df = ReconciliationService.apply_mapping(
-                DataFrameService.load_file(processor_upload.storage_path), mappings, "processor")
+                ReconciliationService.load_upload(processor_upload), mappings, "processor")
             mapped_company_df = CanonicalService.prepare(mapped_company_df)
             processor_df = CanonicalService.prepare(processor_df)
 

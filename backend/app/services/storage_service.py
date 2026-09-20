@@ -74,7 +74,13 @@ def materialize(reference):
     with NamedTemporaryFile(suffix=PurePosixPath(key).suffix, delete=False) as file:
         path = Path(file.name)
     try:
-        response = s3_client().get_object(Bucket=bucket, Key=key)
+        from botocore.exceptions import ClientError
+        try:
+            response = s3_client().get_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
+                raise FileNotFoundError("The stored file is missing.") from exc
+            raise
         size = 0
         try:
             with path.open("wb") as output:

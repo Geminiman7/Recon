@@ -47,6 +47,41 @@ def active_user(user=Depends(get_current_user)):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_missing_stored_files_return_actionable_errors_and_fail_attempt(self):
+        from app.models.upload import Upload, UploadType
+        from app.models.processor import Processor
+        from app.models.column_mapping import ColumnMapping
+        processor = Processor(name="Missing file test")
+        self.db.add(processor)
+        self.db.flush()
+        records = []
+        for kind, name in [(UploadType.COMPANY, "company.csv"), (UploadType.PROCESSOR, "processor.csv")]:
+            record = Upload(company_id=self.company.id, job_id=self.job.id, uploaded_by=self.user.id,
+                processor_id=processor.id if kind == UploadType.PROCESSOR else None,
+                original_filename=name, stored_filename=name, storage_path="local://" + name,
+                file_size=20, checksum=name, mime_type="text/csv", upload_type=kind)
+            self.db.add(record)
+            records.append(record)
+        self.db.flush()
+        self.db.add(ColumnMapping(company_id=self.company.id, job_id=self.job.id,
+            processor_id=processor.id, processor_upload_id=records[1].id,
+            company_column="transaction_id", processor_column="transaction_id", canonical_column="transaction_id"))
+        self.db.commit()
+        with tempfile.TemporaryDirectory() as folder, patch.object(storage, "ROOT", Path(folder)), patch.object(settings, "RECONCILIATION_MODE", "sync"):
+            for filename in ("company.csv", "processor.csv"):
+                response = self.client.post(f"/reconciliation/{self.job.id}/run", headers=self.csrf())
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertIn(filename, response.json()["detail"])
+                self.assertIn("new job", response.json()["detail"])
+                self.assertNotIn(folder, response.text)
+                self.db.refresh(self.job)
+                self.assertEqual(self.job.status, JobStatus.FAILED)
+                if filename == "company.csv":
+                    Path(folder, filename).write_text("transaction_id,amount,status\na,1,success\n")
+            response = self.client.get(f"/uploads/{records[1].id}/columns")
+            self.assertEqual(response.status_code, 410)
+            self.assertNotIn(folder, response.text)
+
     @classmethod
     def setUpClass(cls):
         cls.password_hash = hash_password("valid-test-password")
@@ -251,6 +286,32 @@ class BoundaryTests(unittest.TestCase):
 
 
 class FileBoundaryTests(unittest.TestCase):
+    def test_s3_missing_key_is_distinct_from_permission_failure(self):
+        from botocore.exceptions import ClientError
+        with patch.object(settings, "S3_BUCKET", "test-bucket"), patch.object(settings, "S3_PREFIX", "recon"), patch.object(storage, "s3_client") as client:
+            client.return_value.get_object.side_effect = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+            with self.assertRaises(FileNotFoundError):
+                with storage.materialize("s3://test-bucket/recon/missing.csv"):
+                    self.fail("Missing object should not produce a file")
+            client.return_value.get_object.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+            with self.assertRaises(ClientError):
+                with storage.materialize("s3://test-bucket/recon/private.csv"):
+                    self.fail("Permission failure should not produce a file")
+
+    def test_railway_local_storage_requires_volume_and_sync(self):
+        from app.core.config import Settings, BASE_DIR
+        options = dict(_env_file=None, ENVIRONMENT="production", STORAGE_BACKEND="local",
+            RECONCILIATION_MODE="sync", REDIS_URL=None,
+            SECRET_KEY="test-only-secret-with-at-least-32-bytes", FRONTEND_URL="https://example.com")
+        with patch.dict(os.environ, {"RAILWAY_ENVIRONMENT_ID": "test", "RAILWAY_VOLUME_MOUNT_PATH": str(BASE_DIR / "storage")}):
+            self.assertFalse(Settings(**options).database_echo)
+            with self.assertRaisesRegex(RuntimeError, "volume"):
+                Settings(**{**options, "RECONCILIATION_MODE": "async"})
+            for mount in ("", str(BASE_DIR / "unrelated"), str(BASE_DIR / "storage" / "uploads")):
+                with patch.dict(os.environ, {"RAILWAY_VOLUME_MOUNT_PATH": mount}):
+                    with self.assertRaisesRegex(RuntimeError, "volume"):
+                        Settings(**options)
+
     def test_csv_content_and_dimension_limits(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"sample.csv"

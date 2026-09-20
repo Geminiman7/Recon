@@ -1,5 +1,45 @@
 # Railway deployment
 
+## API-only reconciliation with persistent local files
+
+For a single API service without Redis or a worker, set `RECONCILIATION_MODE=sync`
+and `STORAGE_BACKEND=local`, and attach a Railway volume mounted at
+`/app/app/storage`. This covers uploads and exports. Use one service replica;
+separate worker services cannot access this service's volume. The existing
+asynchronous export workflow still requires a worker and shared S3; this option
+is for synchronous reconciliation.
+
+Keep `REDIS_URL` empty. Set `ENVIRONMENT=production`, a strong `SECRET_KEY`,
+and your HTTPS `FRONTEND_URL`. Railway supplies `RAILWAY_VOLUME_MOUNT_PATH` when
+a volume is attached; the application validates that it covers the storage root.
+Keep the API start command and Alembic pre-deploy migration command as documented
+below. Volumes mount at runtime, so do not restore files in the pre-deploy command.
+
+The root Dockerfile runs as a non-root user. Railway's documented volume-permission
+option is `RAILWAY_RUN_UID=0`; alternatively provision write permissions for the
+image's UID 1000. Check for `PermissionError` when testing an upload.
+
+Attach storage before uploading replacement files. A new empty volume does not
+restore old container files and can hide files previously written at its mount
+path. Back up accessible existing files before attaching it. If originals are
+gone, create a new job, upload both original datasets, save mappings, and run
+again. Creating a new job avoids old missing-file records and duplicate-upload
+checks. If you have a backup, restoring files at their original paths preserves
+existing jobs and mappings. No file contents can be recovered from upload metadata.
+
+`FileNotFoundError` for `/app/app/storage/uploads/...` means a saved upload record
+points to a file absent from the current container. It is unrelated to Redis.
+The API now returns a helpful 422 for reconciliation or 410 for column headers
+instead of a generic 500. SQL echo logging is disabled on Railway to avoid
+flooding deployment logs even if `ENVIRONMENT` was accidentally left as development.
+
+Readiness currently tracks background-worker availability, so an API-only setup
+can still report `/health/ready` as unavailable. Keep `/health/live` as the Railway
+deployment healthcheck for this mode; verify reconciliation using a small job.
+
+References: https://docs.railway.com/volumes and
+https://docs.railway.com/services#ephemeral-storage
+
 ## Running without Redis
 
 Redis is optional. Deploy the latest code to the API and a separate

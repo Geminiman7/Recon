@@ -86,7 +86,7 @@ class Settings(BaseSettings):
 
     @property
     def database_echo(self) -> bool:
-        return not self.is_production
+        return not self.is_production and not os.getenv("RAILWAY_ENVIRONMENT_ID")
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[2] / ".env",
@@ -101,7 +101,14 @@ class Settings(BaseSettings):
         if self.DATABASE_URL.startswith("postgres://"):
             self.DATABASE_URL = "postgresql+psycopg2://" + self.DATABASE_URL[len("postgres://"):]
         if os.getenv("RAILWAY_ENVIRONMENT_ID") and self.is_production and self.STORAGE_BACKEND != "s3":
-            raise RuntimeError("Railway API and workers require shared S3 storage; set STORAGE_BACKEND=s3.")
+            mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "")
+            storage_root = Path(__file__).resolve().parent.parent / "storage"
+            persistent_local = (self.STORAGE_BACKEND == "local"
+                and self.RECONCILIATION_MODE.lower() == "sync"
+                and bool(mount) and Path(mount).is_absolute()
+                and storage_root.is_relative_to(Path(mount).resolve()))
+            if not persistent_local:
+                raise RuntimeError("Railway requires S3 storage, or sync mode with a Railway volume mounted at /app/app/storage for an API-only deployment.")
         for name in ("S3_BUCKET", "S3_REGION", "S3_ENDPOINT_URL", "S3_KMS_KEY_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "PAYSTACK_SECRET_KEY", "PAYSTACK_PRO_PLAN_CODE", "PAYSTACK_PRO_ANNUAL_PLAN_CODE", "SENTRY_DSN"):
             if getattr(self, name) == "":
                 setattr(self, name, None)
