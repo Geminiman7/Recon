@@ -85,4 +85,12 @@ class ReconciliationEngine:
                 "processor_status": processor_row["status"]
             })
 
+        # Pandas row access produces NumPy scalars. psycopg2 can serialize their
+        # repr (e.g. np.float64(...)) as SQL instead of a numeric literal.
+        # Normalize every result branch before values cross the DB boundary.
+        for result in results:
+            for field in ("company_amount", "processor_amount"):
+                value = result[field]
+                result[field] = None if value is None else float(value)
+
         return results

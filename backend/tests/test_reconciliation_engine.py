@@ -7,6 +7,40 @@ from app.services.reconciliation_engine import ReconciliationEngine
 
 
 class ReconciliationEngineTests(unittest.TestCase):
+    def test_all_result_amounts_are_native_numbers_for_postgres(self):
+        from psycopg2.extensions import adapt
+        for dtype in ("float64", "int64"):
+            with self.subTest(dtype=dtype):
+                company = pd.DataFrame([
+                    ["matched", 5000, "SUCCESS"],
+                    ["amount", 10, "SUCCESS"],
+                    ["status", 20, "FAILED"],
+                    ["company-only", 30, "SUCCESS"],
+                    ["duplicate", 40, "SUCCESS"],
+                    ["duplicate", 40, "SUCCESS"],
+                ], columns=["transaction_id", "amount", "status"])
+                processor = pd.DataFrame([
+                    ["matched", 5000, "SUCCESS"],
+                    ["amount", 11, "SUCCESS"],
+                    ["status", 20, "SUCCESS"],
+                    ["processor-only", 50, "SUCCESS"],
+                    ["duplicate", 40, "SUCCESS"],
+                ], columns=["transaction_id", "amount", "status"])
+                company["amount"] = company["amount"].astype(dtype)
+                processor["amount"] = processor["amount"].astype(dtype)
+                results = ReconciliationEngine.reconcile(company, processor)
+                self.assertEqual({row["status"] for row in results}, set(ReconciliationStatus))
+                for row in results:
+                    for field in ("company_amount", "processor_amount"):
+                        value = row[field]
+                        if value is not None:
+                            self.assertIs(type(value), float)
+                            self.assertEqual(float(adapt(value).getquoted()), value)
+                by_id = {row["transaction_id"]: row for row in results}
+                self.assertEqual(by_id["matched"]["company_amount"], 5000.0)
+                self.assertIsNone(by_id["company-only"]["processor_amount"])
+                self.assertIsNone(by_id["processor-only"]["company_amount"])
+
     def test_transaction_in_later_processor_file_is_not_missing(self):
         company = pd.DataFrame([
             {"transaction_id": "company-only", "amount": 100, "status": "SUCCESS"},
