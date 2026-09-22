@@ -109,7 +109,7 @@ class BillingService:
             "amount": plan.amount_kobo,
             "currency": "NGN",
             "reference": reference,
-            "callback_url": f"{settings.FRONTEND_URL.rstrip('/')}/subscription.html?reference={reference}",
+            "callback_url": f"{settings.FRONTEND_URL.rstrip('/')}/subscription?reference={reference}",
             "metadata": {"company_id": str(company.id), "subscription_id": str(subscription.id), "plan": plan.code},
         }
         if plan.gateway_plan_code:

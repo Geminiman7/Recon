@@ -108,7 +108,7 @@ document.addEventListener(
         /*
          * If reconciliation page sent us here with:
          *
-         * results.html?job_id=XXXX
+         * /results?job_id=XXXX
          */
 
         const params =

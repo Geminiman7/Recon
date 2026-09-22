@@ -28,8 +28,8 @@ async function ensureCsrf() {
 
 function handleExpiredSession() {
     const page = location.pathname.split("/").pop();
-    if (!["", "index.html", "login.html", "register.html", "forgot-password.html", "reset-password.html"].includes(page)) {
-        location.replace("login.html?expired=1");
+    if (!["", "index.html", "login", "login.html", "register", "register.html", "forgot-password", "forgot-password.html", "reset-password", "reset-password.html"].includes(page)) {
+        location.replace("/login?expired=1");
     }
 }
 

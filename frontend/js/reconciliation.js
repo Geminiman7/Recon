@@ -151,6 +151,9 @@ async function runReconciliation() {
         document.getElementById("runBtn");
 
     button.disabled = true;
+    const jobSelect = document.getElementById("jobSelect");
+    const jobId = selectedJobId;
+    jobSelect.disabled = true;
 
     button.innerText =
         "Starting...";
@@ -168,9 +171,9 @@ async function runReconciliation() {
 
     try {
 
-        const response =
+        let response =
             await api(
-                `/reconciliation/${selectedJobId}/run`,
+                `/reconciliation/${jobId}/run`,
                 "POST"
             );
 
@@ -181,6 +184,27 @@ async function runReconciliation() {
         );
 
 
+        if (["QUEUED", "PROCESSING"].includes(response.result_state)) {
+            button.innerText = "Processing...";
+            let completed = false;
+            for (let attempt = 0; attempt < 150; attempt++) {
+                const job = await api(`/jobs/${jobId}`);
+                document.getElementById("jobStatus").innerText = job.status;
+                if (job.status === "FAILED") {
+                    throw new Error("Reconciliation failed. Check your uploaded files and column mappings before trying again.");
+                }
+                if (job.status === "COMPLETED") {
+                    response = await api(`/reconciliation/${jobId}/results?page_size=1`);
+                    completed = true;
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            if (!completed) {
+                throw new Error("Reconciliation is still running. Check its status on the Jobs page before viewing results.");
+            }
+        }
+        document.getElementById("jobStatus").innerText = "COMPLETED";
         displayResults(response);
 
 
@@ -201,6 +225,7 @@ async function runReconciliation() {
     finally {
 
         button.disabled = false;
+        jobSelect.disabled = false;
 
         button.innerText =
             "Refresh Reconciliation";
@@ -266,6 +291,6 @@ function displayResults(result) {
 function viewResults() {
 
     window.location.href =
-        `results.html?job_id=${selectedJobId}`;
+        `/results?job_id=${selectedJobId}`;
 
 }

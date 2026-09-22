@@ -42,7 +42,7 @@ class AuthService:
         ))
         db.commit()
 
-        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password.html?token={token}"
+        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
         if settings.SMTP_HOST and settings.SMTP_FROM_EMAIL:
             message = EmailMessage()
             message["Subject"] = "Reset your Recon password"

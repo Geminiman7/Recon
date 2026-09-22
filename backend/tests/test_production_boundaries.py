@@ -47,6 +47,76 @@ def active_user(user=Depends(get_current_user)):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_upload_mapping_reconciliation_results_workflow(self):
+        from io import BytesIO
+        from app.models.processor import Processor
+
+        processor = Processor(name="Workflow processor", is_active=True)
+        self.db.add(processor)
+        self.db.commit()
+        created = self.client.post("/jobs", json={"job_name": "Upload workflow"}, headers=self.csrf())
+        self.assertEqual(created.status_code, 200, created.text)
+        job_id = created.json()["id"]
+        company = ("ID,Value,State\nmatched,100,SUCCESS\namount,200,SUCCESS\n"
+                   "status,300,FAILED\ncompany-only,400,SUCCESS\n"
+                   "duplicate,500,SUCCESS\nduplicate,500,SUCCESS\nlater-file,600,SUCCESS\n")
+        first = ("Ref,Total,Outcome\nmatched,100,SUCCESS\namount,201,SUCCESS\n"
+                 "status,300,SUCCESS\nprocessor-only,700,SUCCESS\nduplicate,500,SUCCESS\n")
+        workbook = Workbook()
+        workbook.active.append(["Ref", "Total", "Outcome"])
+        workbook.active.append(["later-file", 600, "SUCCESS"])
+        excel = BytesIO()
+        workbook.save(excel)
+        workbook.close()
+        with tempfile.TemporaryDirectory() as folder, patch.object(storage, "ROOT", Path(folder)), \
+                patch.object(settings, "STORAGE_BACKEND", "local"), \
+                patch.object(settings, "RECONCILIATION_MODE", "sync"):
+            upload_ids = []
+            for kind, filename, content, mime in (
+                ("company", "company.csv", company.encode(), "text/csv"),
+                ("processor", "first.csv", first.encode(), "text/csv"),
+                ("processor", "second.xlsx", excel.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            ):
+                data = {"job_id": job_id}
+                if kind == "processor":
+                    data["processor_id"] = str(processor.id)
+                response = self.client.post(f"/uploads/{kind}", data=data,
+                    files={"file": (filename, content, mime)}, headers=self.csrf())
+                self.assertEqual(response.status_code, 200, response.text)
+                upload_id = response.json()["id"]
+                upload_ids.append(upload_id)
+                headers = self.client.get(f"/uploads/{upload_id}/columns")
+                self.assertEqual(headers.status_code, 200, headers.text)
+                self.assertEqual(len(headers.json()["columns"]), 3)
+            listed = self.client.get(f"/uploads/job/{job_id}")
+            self.assertEqual({row["id"] for row in listed.json()}, set(upload_ids))
+            mapped = self.client.post("/mapping", headers=self.csrf(), json={
+                "job_id": job_id, "company_file_id": upload_ids[0],
+                "processor_file_ids": upload_ids[1:],
+                "company": {"transaction_id": "ID", "amount": "Value", "status": "State"},
+                "processors": {key: {"transaction_id": "Ref", "amount": "Total", "status": "Outcome"}
+                               for key in upload_ids[1:]},
+            })
+            self.assertEqual(mapped.status_code, 200, mapped.text)
+            self.assertEqual(mapped.json()["job_status"], "READY_TO_RECONCILE")
+            for attempt in range(2):
+                run = self.client.post(f"/reconciliation/{job_id}/run", headers=self.csrf())
+                self.assertEqual(run.status_code, 200, run.text)
+                self.assertEqual(run.json()["total"], 7)
+                self.assertEqual(self.client.get(f"/jobs/{job_id}").json()["status"], "COMPLETED")
+                results = self.client.get(f"/reconciliation/{job_id}/results?page_size=2")
+                self.assertEqual(results.status_code, 200, results.text)
+                summary = results.json()
+                self.assertEqual((summary["total"], summary["matched"], summary["mismatched"], summary["missing"]), (7, 2, 3, 2))
+                rows = []
+                for page in range(1, summary["total_pages"] + 1):
+                    rows.extend(self.client.get(f"/reconciliation/{job_id}/results?page_size=2&page={page}").json()["results"])
+                self.assertEqual(len(rows), 7)
+                self.assertEqual({row["status"] for row in rows}, {status.value for status in ReconciliationStatus})
+                later = self.client.get(f"/reconciliation/{job_id}/results?search=later-file&status=MATCHED").json()
+                self.assertEqual(later["filtered_total"], 1)
+                self.assertEqual(later["results"][0]["difference"], 0)
+
     def test_missing_stored_files_return_actionable_errors_and_fail_attempt(self):
         from app.models.upload import Upload, UploadType
         from app.models.processor import Processor

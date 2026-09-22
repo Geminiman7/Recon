@@ -1,5 +1,13 @@
 async function registerCompany() {
 
+    const passwordInput = document.getElementById("password");
+    const passwordValue = passwordInput.value;
+    if (Array.from(passwordValue).length < 12) {
+        alert("Minimum password length is 12 characters.");
+        passwordInput.focus();
+        return;
+    }
+
     try {
 
         const response = await api(
@@ -12,13 +20,13 @@ async function registerCompany() {
                 address: address.value,
                 admin_name: admin_name.value,
                 admin_email: admin_email.value,
-                password: password.value
+                password: passwordValue
             }
         );
 
         alert(response.message);
 
-        window.location.href = "login.html";
+        window.location.href = "/login";
 
     } catch (error) {
 

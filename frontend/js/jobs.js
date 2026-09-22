@@ -448,7 +448,7 @@ function openJob(jobId) {
 
 
     window.location.href =
-        `job-details.html?id=${encodeURIComponent(jobId)}`;
+        `/job-details?id=${encodeURIComponent(jobId)}`;
 
 }
 

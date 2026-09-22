@@ -11,7 +11,7 @@ async function login() {
             }
         );
 
-        window.location.href = "dashboard.html";
+        window.location.href = "/dashboard";
 
     } catch (error) {
 

@@ -1,9 +1,9 @@
 async function logout() {
     try {
         await api("/auth/logout", "POST");
-        location.replace("login.html");
+        location.replace("/login");
     } catch (error) {
-        if (error.status === 401) location.replace("login.html");
+        if (error.status === 401) location.replace("/login");
         else alert(error.message);
     }
 }

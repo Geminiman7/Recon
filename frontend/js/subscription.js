@@ -49,7 +49,7 @@
         const reference = new URLSearchParams(window.location.search).get("reference");
         if (!reference) return;
         setMessage("Confirming your payment…");
-        try { await api(`/billing/verify/${encodeURIComponent(reference)}`, "POST"); window.history.replaceState({}, "", "subscription.html"); }
+        try { await api(`/billing/verify/${encodeURIComponent(reference)}`, "POST"); window.history.replaceState({}, "", "/subscription"); }
         catch (error) { setMessage(`Payment confirmation is pending: ${error.message}`); }
     }
     async function cancel() {
