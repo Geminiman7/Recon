@@ -11,7 +11,7 @@ from app.models.job import ReconciliationJob, JobStatus
 from app.models.user import User
 from app.models.reconciliation_result import ReconciliationResult
 from app.services.result_service import owned_job, result_query, serialize_result
-from app.services.export_writers import write_excel, write_pdf, MIME, EXTENSION
+from app.services.export_writers import write_csv, write_excel, write_pdf, MIME, EXTENSION
 from app.services import storage_service as storage
 
 
@@ -63,7 +63,8 @@ def generate_export(db, export_id, company_id):
         with TemporaryDirectory(prefix="recon-export-") as folder:
             path = Path(folder) / f"{record.id}.{EXTENSION[record.format]}"
             rows = bounded_rows(result_query(db, company_id, record.job_id, record.filter_status, record.search))
-            record.row_count = (write_excel if record.format == "excel" else write_pdf)(rows, path)
+            writer = {"csv": write_csv, "excel": write_excel, "pdf": write_pdf}[record.format]
+            record.row_count = writer(rows, path)
             if path.stat().st_size > settings.EXPORT_MAX_BYTES:
                 raise ValueError("Export exceeds the size limit. Narrow the filters.")
             reference = storage.put_file(path, f"exports/{company_id}/{record.id}.{EXTENSION[record.format]}", MIME[record.format])

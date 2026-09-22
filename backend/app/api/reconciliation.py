@@ -32,7 +32,7 @@ def request_export(job_id: UUID, format: str, status: str | None = Query(None, m
                    search: str | None = Query(None, max_length=200), db: Session = Depends(get_db),
                    current_user=Depends(require_permission("results:export"))):
     if format not in MIME:
-        raise HTTPException(422, "Choose excel or pdf.")
+        raise HTTPException(422, "Choose csv, excel, or pdf.")
     record = create_export(db, current_user, job_id, format, status, search)
     return {"id": str(record.id), "state": record.state, "expires_at": record.expires_at}
 

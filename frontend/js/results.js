@@ -82,6 +82,14 @@ document.addEventListener(
 
 
         document
+            .getElementById("exportCsvBtn")
+            .addEventListener(
+                "click",
+                exportCsv
+            );
+
+
+        document
             .getElementById("exportExcelBtn")
             .addEventListener(
                 "click",
@@ -805,6 +813,7 @@ function closeModal() {
    EXPORT
 ========================================== */
 
+async function exportCsv() { await requestExport("csv"); }
 async function exportExcel() { await requestExport("excel"); }
 async function exportPdf() { await requestExport("pdf"); }
 
@@ -821,7 +830,7 @@ function exportMessage(message) {
 
 async function requestExport(format) {
     if (!selectedJobId) return;
-    const buttons = ["exportExcelBtn", "exportPdfBtn"].map(id => document.getElementById(id));
+    const buttons = ["exportCsvBtn", "exportExcelBtn", "exportPdfBtn"].map(id => document.getElementById(id));
     buttons.forEach(button => { button.disabled = true; });
     try {
         const record = await api(`/reconciliation/${selectedJobId}/export/${format}?${resultParameters()}`, "POST");

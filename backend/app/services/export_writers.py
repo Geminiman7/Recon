@@ -1,11 +1,12 @@
 from pathlib import Path
 from itertools import islice
+import csv
 from openpyxl import Workbook
 from app.core.config import settings
 
 COLUMNS = ["transaction_id", "company_amount", "processor_amount", "difference", "company_status", "processor_status", "status"]
-MIME = {"excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "pdf": "application/pdf"}
-EXTENSION = {"excel": "xlsx", "pdf": "pdf"}
+MIME = {"csv": "text/csv", "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "pdf": "application/pdf"}
+EXTENSION = {"csv": "csv", "excel": "xlsx", "pdf": "pdf"}
 
 
 def safe_cell(value):
@@ -14,6 +15,19 @@ def safe_cell(value):
             value = "'" + value
         return "".join(c for c in value if ord(c) >= 32 or c in "\t\n\r")[:32767]
     return value
+
+
+def write_csv(rows, path):
+    count = 0
+    with path.open("w", newline="", encoding="utf-8-sig") as output:
+        writer = csv.writer(output)
+        writer.writerow(COLUMNS)
+        for row in rows:
+            writer.writerow([safe_cell(row[key]) for key in COLUMNS])
+            count += 1
+            if output.tell() > settings.EXPORT_MAX_BYTES:
+                raise ValueError("Export exceeds the size limit. Narrow the filters.")
+    return count
 
 
 def write_excel(rows, path):

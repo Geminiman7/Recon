@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 from unittest.mock import patch
 from fastapi import Depends, HTTPException
 from fastapi.testclient import TestClient
@@ -270,6 +270,34 @@ class BoundaryTests(unittest.TestCase):
             reference = record.storage_path
             expire_exports(self.db)
             self.assertFalse(storage.local_path(reference).exists())
+
+    def test_csv_and_excel_exports_are_ready_for_download(self):
+        self.add_results()
+        expected = {
+            "csv": ("text/csv", ".csv", b"transaction_id,company_amount"),
+            "excel": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx", b"PK"),
+        }
+        with tempfile.TemporaryDirectory() as folder, patch.object(storage, "ROOT", Path(folder)):
+            for export_format, (content_type, extension, signature) in expected.items():
+                with self.subTest(format=export_format), patch("app.workers.export_worker.build_export.delay"):
+                    response = self.client.post(
+                        f"/reconciliation/{self.job.id}/export/{export_format}?status=MATCHED",
+                        headers=self.csrf(),
+                    )
+                self.assertEqual(response.status_code, 202, response.text)
+                export_id = UUID(response.json()["id"])
+                generate_export(self.db, export_id, self.company.id)
+
+                status = self.client.get(f"/reconciliation/exports/{export_id}")
+                self.assertEqual(status.status_code, 200, status.text)
+                self.assertEqual(status.json()["state"], "READY")
+                self.assertEqual(status.json()["row_count"], 4)
+
+                download = self.client.get(f"/reconciliation/exports/{export_id}/download")
+                self.assertEqual(download.status_code, 200, download.text)
+                self.assertTrue(download.headers["content-type"].startswith(content_type))
+                self.assertIn(extension, download.headers["content-disposition"])
+                self.assertIn(signature, download.content)
 
     def test_unexpected_error_is_sanitized(self):
         with patch("app.services.dashboard_service.DashboardService.company_summary", side_effect=RuntimeError("private database password")):
